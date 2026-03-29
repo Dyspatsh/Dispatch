@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Enable 2FA{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h1>Enable Two-Factor Authentication</h1>
+    
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+    
+    {% if success %}
+    <div class="success">{{ success }}</div>
+    <div class="return-link">
+        <a href="/profile" class="btn btn-primary">Return to Settings</a>
+    </div>
+    {% else %}
+    <div class="qr-section">
+        <h3>Step 1: Scan QR Code</h3>
+        <p>Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)</p>
+        <img src="data:image/png;base64,{{ qr_code }}" alt="QR Code" class="qr-code">
+        <p class="secret-text">Or enter this secret manually: <strong>{{ totp_secret }}</strong></p>
+    </div>
+    
+    <div class="recovery-section">
+        <h3>Step 2: Save Recovery Codes</h3>
+        <p>These codes can be used to log in if you lose access to your authenticator app. Each code can be used only once.</p>
+        <div class="codes-container">
+            {% for code in recovery_codes %}
+            <div class="recovery-code">{{ code }}</div>
+            {% endfor %}
+        </div>
+        <p class="warning-text">Save these codes now! You won't see them again after enabling 2FA.</p>
+    </div>
+    
+    <div class="verify-section">
+        <h3>Step 3: Verify Setup</h3>
+        <p>Enter the 6-digit code from your authenticator app to enable 2FA.</p>
+        <form method="post" action="/profile/enable-2fa">
+            <div class="form-group">
+                <label for="code">Verification Code</label>
+                <input type="text" id="code" name="code" required placeholder="000000">
+            </div>
+            <button type="submit" class="btn btn-primary">Enable 2FA</button>
+            <a href="/profile" class="btn btn-secondary">Cancel</a>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.qr-code {
+    display: block;
+    margin: 1rem auto;
+    width: 200px;
+    height: 200px;
+    border: 1px solid #ddd;
+    padding: 0.5rem;
+    background: white;
+    border-radius: 8px;
+}
+.secret-text {
+    text-align: center;
+    font-family: monospace;
+    font-size: 0.9rem;
+    margin: 1rem 0;
+    word-break: break-all;
+}
+.codes-container {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+    margin: 1rem 0;
+}
+.recovery-code {
+    background: #f0f0f0;
+    color: #333;
+    padding: 0.5rem;
+    text-align: center;
+    font-family: monospace;
+    font-size: 1rem;
+    font-weight: bold;
+    border-radius: 4px;
+}
+body.dark .recovery-code {
+    background: #2a2a2a;
+    color: #0f0;
+}
+.qr-section, .recovery-section, .verify-section {
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #ddd;
+}
+body.dark .qr-section,
+body.dark .recovery-section,
+body.dark .verify-section {
+    border-bottom-color: #444;
+}
+.warning-text {
+    color: #ff4444;
+    font-weight: bold;
+}
+@media (max-width: 480px) {
+    .codes-container {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+{% endblock %}

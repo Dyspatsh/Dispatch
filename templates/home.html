@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<div class="hero">
+    <h1>Dispatch</h1>
+    <h2>Privacy-Focused Tor File Sharing</h2>
+    <p>Send encrypted files anonymously. No tracking. No logs. Tor only.</p>
+    
+    <div class="features">
+        <div class="feature">
+            <h3>Client-Side Encryption</h3>
+            <p>Files encrypted before upload. We never see your data.</p>
+        </div>
+        <div class="feature">
+            <h3>Complete Anonymity</h3>
+            <p>Tor-only access. No IP logging. No tracking.</p>
+        </div>
+        <div class="feature">
+            <h3>Private Chat</h3>
+            <p>End-to-end encrypted messages that auto-delete.</p>
+        </div>
+    </div>
+    
+    <div class="cta-buttons">
+        {% if user %}
+            <a href="/send" class="btn btn-primary">Send File</a>
+        {% else %}
+            <a href="/register" class="btn btn-primary">Get Started</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

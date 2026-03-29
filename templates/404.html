@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Page Not Found{% endblock %}
+
+{% block content %}
+<div class="error-page">
+    <h1>404</h1>
+    <h2>Page Not Found</h2>
+    <p>The page you are looking for does not exist or has been moved.</p>
+    <div class="cta-buttons">
+        <a href="/home" class="btn btn-primary">Go to Home</a>
+        {% if user %}
+            <a href="/profile" class="btn btn-secondary">Go to Settings</a>
+        {% else %}
+            <a href="/login" class="btn btn-secondary">Go to Login</a>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+.error-page {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+.error-page h1 {
+    font-size: 6rem;
+    color: #5a2d8c;
+    margin-bottom: 1rem;
+}
+.error-page h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+}
+.error-page p {
+    color: #888;
+    margin-bottom: 2rem;
+}
+.error-page .btn {
+    margin: 0.5rem;
+}
+@media (max-width: 768px) {
+    .error-page h1 {
+        font-size: 4rem;
+    }
+    .error-page {
+        padding: 2rem 1rem;
+    }
+}
+</style>
+{% endblock %}

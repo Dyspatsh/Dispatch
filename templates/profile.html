@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="profile-container">
+    <h1>Settings</h1>
+    
+    <div class="settings-section">
+        <h2>My Account</h2>
+        <div class="account-info">
+            <p><strong>Username:</strong> {{ user.username }}</p>
+            <p><strong>Role:</strong> {{ user.role }}</p>
+            <p><strong>Member since:</strong> {{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+            <p><strong>Account age:</strong> {{ ((now - user.created_at).days) }} days</p>
+        </div>
+    </div>
+    
+    <div class="settings-section">
+        <h2>Upgrade Account</h2>
+        <div class="action-item">
+            <div class="action-info">
+                <h3>Get More Features</h3>
+                <p>Upgrade to Pro or Premium for advanced features</p>
+            </div>
+            <a href="/upgrade" class="btn btn-primary">Upgrade</a>
+        </div>
+    </div>
+    
+    <div class="settings-section">
+        <h2>Actions</h2>
+        
+        <div class="action-item">
+            <div class="action-info">
+                <h3>Theme</h3>
+                <p>Switch between light and dark mode</p>
+            </div>
+            <label class="theme-switch">
+                <input type="checkbox" id="themeToggle" {% if user.theme == 'dark' %}checked{% endif %}>
+                <span class="theme-slider"></span>
+            </label>
+        </div>
+        
+        <div class="action-item">
+            <div class="action-info">
+                <h3>Change Password</h3>
+                <p>Update your account password</p>
+            </div>
+            <a href="/profile/change-password" class="btn btn-secondary">Change Password</a>
+        </div>
+        
+        <div class="action-item">
+            <div class="action-info">
+                <h3>Change PIN</h3>
+                <p>Update your 6-digit login PIN</p>
+            </div>
+            <a href="/profile/change-pin" class="btn btn-secondary">Change PIN</a>
+        </div>
+        
+        <div class="action-item danger-item">
+            <div class="action-info">
+                <h3>Delete Account</h3>
+                <p>Permanently delete your account and all data</p>
+            </div>
+            <a href="/profile/delete-account" class="btn btn-danger">Delete Account</a>
+        </div>
+    </div>
+    
+    <div class="settings-section">
+        <h2>Two-Factor Authentication</h2>
+        <div class="action-item">
+            <div class="action-info">
+                <h3>Two-Factor Authentication</h3>
+                <p>Add an extra layer of security to your account</p>
+            </div>
+            {% if user.totp_enabled %}
+                <form method="post" action="/profile/disable-2fa" onsubmit="return confirm('Disable 2FA? This will make your account less secure.')">
+                    <button type="submit" class="btn btn-danger">Disable 2FA</button>
+                </form>
+            {% else %}
+                <a href="/profile/enable-2fa" class="btn btn-primary">Enable 2FA</a>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="settings-section">
+        <h2>Blocked Contacts</h2>
+        <div id="blockedList" class="blocked-list">
+            <p class="empty-message">Loading blocked contacts...</p>
+        </div>
+    </div>
+    
+    <div class="settings-section">
+        <h2>Session</h2>
+        <div class="action-item">
+            <div class="action-info">
+                <h3>Logout</h3>
+                <p>Sign out of your account</p>
+            </div>
+            <a href="/logout" class="btn btn-secondary">Logout</a>
+        </div>
+    </div>
+</div>
+
+<script>
+    const themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('change', function() {
+            const newTheme = this.checked ? 'dark' : 'light';
+            document.body.className = newTheme;
+            localStorage.setItem('theme', newTheme);
+            fetch('/profile/change-theme', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'theme=' + newTheme
+            });
+        });
+    }
+    
+    function loadBlockedContacts() {
+        fetch('/chat/blocked/list')
+            .then(res => res.json())
+            .then(data => {
+                const blockedList = document.getElementById('blockedList');
+                if (data.success && data.blocked_users && data.blocked_users.length > 0) {
+                    blockedList.innerHTML = data.blocked_users.map(user => `
+                        <div class="blocked-item">
+                            <span class="blocked-username">${escapeHtml(user.username)}</span>
+                            <button class="btn btn-small btn-secondary" onclick="unblockUser(${user.id})">Unblock</button>
+                        </div>
+                    `).join('');
+                } else {
+                    blockedList.innerHTML = '<p class="empty-message">No blocked contacts</p>';
+                }
+            });
+    }
+    
+    function unblockUser(userId) {
+        fetch('/chat/unblock/' + userId, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    loadBlockedContacts();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to unblock user'));
+                }
+            });
+    }
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    loadBlockedContacts();
+</script>
+{% endblock %}

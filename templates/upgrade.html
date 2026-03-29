@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+
+{% block title %}Upgrade Account{% endblock %}
+
+{% block content %}
+<div class="upgrade-container">
+    <h1>Upgrade Your Account</h1>
+    <p class="upgrade-description">Choose the plan that fits your needs. All payments are processed via Monero (XMR) for complete privacy.</p>
+    
+    <div class="pricing-grid">
+        <div class="pricing-card {% if user.role == 'pro' %}current-plan{% endif %}">
+            <div class="pricing-header">
+                <h2>Pro</h2>
+                <div class="price">$5<span>/month</span></div>
+            </div>
+            <div class="pricing-features">
+                <ul>
+                    <li>Send files up to 5 GB</li>
+                    <li>Up to 50 concurrent active files</li>
+                    <li>Custom file expiration (1-7 days)</li>
+                    <li>Password-protected files</li>
+                    <li>Private chat with 100 characters per message</li>
+                    <li>File history retention: 60 days</li>
+                </ul>
+            </div>
+            <div class="pricing-action">
+                {% if user.role == 'pro' %}
+                    <button class="btn btn-secondary" disabled>You are already Pro</button>
+                {% elif user.role == 'premium' %}
+                    <button class="btn btn-secondary" disabled>Premium includes Pro features</button>
+                {% else %}
+                    <button class="btn btn-primary" onclick="showUpgradeModal('pro')">Get Pro</button>
+                {% endif %}
+            </div>
+        </div>
+        
+        <div class="pricing-card {% if user.role == 'premium' %}current-plan{% endif %}">
+            <div class="pricing-header">
+                <h2>Premium</h2>
+                <div class="price">$12<span>/month</span></div>
+            </div>
+            <div class="pricing-features">
+                <ul>
+                    <li>Send files up to 10 GB</li>
+                    <li>Up to 100 concurrent active files</li>
+                    <li>Custom file expiration (1-7 days)</li>
+                    <li>Password-protected files</li>
+                    <li>Private chat with 200 characters per message</li>
+                    <li>File history retention: 90 days</li>
+                </ul>
+            </div>
+            <div class="pricing-action">
+                {% if user.role == 'premium' %}
+                    <button class="btn btn-secondary" disabled>You are already Premium</button>
+                {% else %}
+                    <button class="btn btn-primary" onclick="showUpgradeModal('premium')">Get Premium</button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="upgradeModal" class="modal">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h2>Upgrade to <span id="selectedPlan"></span></h2>
+        <p>To upgrade your account, please send an email to <strong>dispatsh@proton.me</strong> with the following information:</p>
+        <div class="modal-instructions">
+            <p><strong>Subject:</strong> Upgrade Request - <span id="planSubject"></span></p>
+            <p><strong>Body:</strong></p>
+            <div class="email-template">
+                Username: {{ user.username }}<br>
+                Requested Plan: <span id="planBody"></span><br>
+                <br>
+                I would like to upgrade my account. Please provide your Monero wallet address so I can send the payment.<br>
+                <br>
+                Thank you.
+            </div>
+        </div>
+        <p class="modal-note">After sending the email, you will receive a Monero wallet address. Once payment is confirmed, your account will be upgraded within 24 hours.</p>
+        <button class="btn btn-primary" onclick="closeModal()">Close</button>
+    </div>
+</div>
+
+<style>
+.upgrade-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+.upgrade-description {
+    text-align: center;
+    margin-bottom: 2rem;
+    color: #666;
+}
+.pricing-grid {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+}
+.pricing-card {
+    background: rgba(90, 45, 140, 0.05);
+    border-radius: 12px;
+    padding: 2rem;
+    width: 350px;
+    transition: transform 0.3s ease;
+    border: 1px solid rgba(90, 45, 140, 0.2);
+}
+.pricing-card:hover {
+    transform: translateY(-5px);
+}
+.pricing-card.current-plan {
+    border: 2px solid #5a2d8c;
+}
+.pricing-header {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(90, 45, 140, 0.2);
+}
+.price {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #5a2d8c;
+}
+.price span {
+    font-size: 0.875rem;
+    font-weight: normal;
+    color: #666;
+}
+.pricing-features ul {
+    list-style: none;
+    padding: 0;
+}
+.pricing-features li {
+    padding: 0.5rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+}
+.pricing-features li:before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #00c851;
+}
+.pricing-action {
+    margin-top: 1.5rem;
+    text-align: center;
+}
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+.modal-content {
+    background-color: #fff;
+    margin: 10% auto;
+    padding: 2rem;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    position: relative;
+}
+body.dark .modal-content {
+    background-color: #2a2a2a;
+    color: #f5f5f5;
+}
+.close {
+    position: absolute;
+    right: 1.5rem;
+    top: 1rem;
+    font-size: 1.5rem;
+    cursor: pointer;
+}
+.close:hover {
+    color: #ff4444;
+}
+.modal-instructions {
+    background: #f5f5f5;
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+}
+body.dark .modal-instructions {
+    background: #1a1a1a;
+}
+.email-template {
+    background: #fff;
+    padding: 1rem;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+    border: 1px solid #ddd;
+}
+body.dark .email-template {
+    background: #333;
+    border-color: #555;
+}
+.modal-note {
+    font-size: 0.875rem;
+    color: #666;
+    margin: 1rem 0;
+}
+@media (max-width: 768px) {
+    .pricing-card {
+        width: 100%;
+        max-width: 350px;
+    }
+}
+</style>
+
+<script>
+    function showUpgradeModal(plan) {
+        const modal = document.getElementById('upgradeModal');
+        const planName = plan === 'pro' ? 'Pro' : 'Premium';
+        document.getElementById('selectedPlan').textContent = planName;
+        document.getElementById('planSubject').textContent = planName;
+        document.getElementById('planBody').textContent = planName;
+        modal.style.display = 'block';
+    }
+    function closeModal() {
+        document.getElementById('upgradeModal').style.display = 'none';
+    }
+    window.onclick = function(event) {
+        const modal = document.getElementById('upgradeModal');
+        if (event.target == modal) {
+            modal.style.display = 'none';
+        }
+    }
+</script>
+{% endblock %}

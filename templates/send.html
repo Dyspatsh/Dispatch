@@ -1,0 +1,397 @@
+{% extends "base.html" %}
+
+{% block title %}Send File{% endblock %}
+
+{% block content %}
+<div class="send-container">
+    <h1>Send File</h1>
+    
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+    
+    <form id="sendForm" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="recipient">Recipient Username</label>
+            <input type="text" id="recipient" name="recipient" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="file">File</label>
+            <input type="file" id="file" name="file" required>
+            <small id="fileInfo"></small>
+        </div>
+        
+        <div class="options-section">
+            <h3>File Options</h3>
+            <p class="options-note">Select the options you want to apply to this file</p>
+            
+            <div class="options-grid">
+                {% if user.role in ['pro', 'premium', 'owner'] %}
+                <div class="option-card">
+                    <label class="option-checkbox">
+                        <input type="checkbox" id="customExpiryCheckbox" class="option-toggle">
+                        <span class="checkmark"></span>
+                        <span class="option-title">Custom Expiration</span>
+                    </label>
+                    <div id="customExpiryOptions" class="option-details" style="display:none;">
+                        <label>Expiration (days):</label>
+                        <select id="customExpiryDays">
+                            <option value="1">1 day</option>
+                            <option value="3">3 days</option>
+                            <option value="5">5 days</option>
+                            <option value="7">7 days</option>
+                        </select>
+                        <small>Files expire after selected days</small>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if user.role in ['pro', 'premium', 'owner'] %}
+                <div class="option-card">
+                    <label class="option-checkbox">
+                        <input type="checkbox" id="passwordProtectCheckbox" class="option-toggle">
+                        <span class="checkmark"></span>
+                        <span class="option-title">Password Protection</span>
+                    </label>
+                    <div id="passwordOptions" class="option-details" style="display:none;">
+                        <label>File Password:</label>
+                        <input type="password" id="filePassword" placeholder="Enter password for file">
+                        <small>Recipient will need this password to download</small>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <div class="progress-container" style="display:none;">
+            <div class="progress-bar"></div>
+            <p class="progress-text">Encrypting and uploading...</p>
+        </div>
+        
+        <button type="submit" id="submitBtn" class="btn btn-primary">Send File</button>
+    </form>
+    
+    <div class="role-features-section">
+        <h3>Your Current Role: <span class="role-badge">{{ user.role|capitalize }}</span></h3>
+        <div class="features-list">
+            <h4>Features Available to You:</h4>
+            <ul>
+                <li>Maximum File Size: 
+                    {% if user.role == 'user' %}1 GB
+                    {% elif user.role == 'pro' %}5 GB
+                    {% elif user.role == 'premium' %}10 GB
+                    {% else %}Unlimited{% endif %}
+                </li>
+                <li>Concurrent Files: 
+                    {% if user.role == 'user' %}10
+                    {% elif user.role == 'pro' %}50
+                    {% elif user.role == 'premium' %}100
+                    {% else %}Unlimited{% endif %}
+                </li>
+                <li>File Retention: 7 days</li>
+                <li>History Retention: 
+                    {% if user.role == 'user' %}30 days
+                    {% elif user.role == 'pro' %}60 days
+                    {% elif user.role == 'premium' %}90 days
+                    {% else %}Forever{% endif %}
+                </li>
+                {% if user.role in ['pro', 'premium', 'owner'] %}
+                <li>Custom Expiration: Available</li>
+                <li>Password Protection: Available</li>
+                {% else %}
+                <li class="disabled-feature">Custom Expiration: Upgrade to Pro</li>
+                <li class="disabled-feature">Password Protection: Upgrade to Pro</li>
+                {% endif %}
+                {% if user.role in ['premium', 'owner'] %}
+                <li>Private Chat: Available ({{ user.role|capitalize }} limit)</li>
+                {% elif user.role == 'pro' %}
+                <li>Private Chat: Available (100 characters)</li>
+                {% else %}
+                <li class="disabled-feature">Private Chat: Upgrade to Pro</li>
+                {% endif %}
+            </ul>
+        </div>
+        {% if user.role == 'user' %}
+        <div class="upgrade-prompt">
+            <a href="/upgrade" class="btn btn-primary">Upgrade to Unlock More Features</a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<style>
+.send-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+.options-section {
+    margin: 1.5rem 0;
+    padding: 1.5rem;
+    background: rgba(90, 45, 140, 0.05);
+    border-radius: 12px;
+    border: 1px solid rgba(90, 45, 140, 0.1);
+}
+.options-section h3 {
+    margin-bottom: 0.5rem;
+    font-size: 1.2rem;
+    color: #5a2d8c;
+}
+.options-note {
+    font-size: 0.875rem;
+    color: #666;
+    margin-bottom: 1.5rem;
+}
+.options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+.option-card {
+    background: rgba(90, 45, 140, 0.08);
+    border-radius: 10px;
+    padding: 1rem;
+    border: 1px solid rgba(90, 45, 140, 0.15);
+}
+.option-checkbox {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    font-weight: bold;
+    margin-bottom: 0.75rem;
+}
+.option-checkbox input {
+    position: absolute;
+    opacity: 0;
+}
+.checkmark {
+    position: relative;
+    display: inline-block;
+    height: 20px;
+    width: 20px;
+    background-color: #fff;
+    border: 2px solid #5a2d8c;
+    border-radius: 4px;
+    margin-right: 12px;
+}
+body.dark .checkmark {
+    background-color: #2a2a2a;
+}
+.option-checkbox input:checked ~ .checkmark {
+    background-color: #5a2d8c;
+}
+.checkmark:after {
+    content: "";
+    position: absolute;
+    display: none;
+}
+.option-checkbox input:checked ~ .checkmark:after {
+    display: block;
+}
+.option-checkbox .checkmark:after {
+    left: 6px;
+    top: 2px;
+    width: 5px;
+    height: 10px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+.option-details {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(90, 45, 140, 0.2);
+}
+.option-details select, .option-details input {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.875rem;
+}
+.option-details small {
+    display: block;
+    font-size: 0.7rem;
+    color: #888;
+    margin-top: 0.5rem;
+}
+.progress-container {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: rgba(90, 45, 140, 0.1);
+    border-radius: 8px;
+    text-align: center;
+}
+.progress-bar {
+    width: 0%;
+    height: 8px;
+    background: #5a2d8c;
+    border-radius: 4px;
+    animation: progress 1s ease-in-out infinite;
+}
+@keyframes progress {
+    0% { width: 0%; }
+    50% { width: 70%; }
+    100% { width: 100%; }
+}
+.role-features-section {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: rgba(90, 45, 140, 0.05);
+    border-radius: 12px;
+}
+.role-badge {
+    display: inline-block;
+    background: #5a2d8c;
+    color: white;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.9rem;
+}
+.features-list ul {
+    list-style: none;
+    padding: 0;
+}
+.features-list li {
+    padding: 0.5rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+}
+.features-list li:before {
+    content: "✓";
+    position: absolute;
+    left: 0;
+    color: #00c851;
+}
+.features-list li.disabled-feature:before {
+    content: "✗";
+    color: #ff4444;
+}
+.features-list li.disabled-feature {
+    opacity: 0.6;
+}
+.upgrade-prompt {
+    margin-top: 1.5rem;
+    text-align: center;
+}
+@media (max-width: 768px) {
+    .options-grid {
+        grid-template-columns: 1fr;
+    }
+}
+</style>
+
+<script>
+    const customExpiryCheckbox = document.getElementById('customExpiryCheckbox');
+    const customExpiryOptions = document.getElementById('customExpiryOptions');
+    if (customExpiryCheckbox) {
+        customExpiryCheckbox.addEventListener('change', function() {
+            customExpiryOptions.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+    
+    const passwordProtectCheckbox = document.getElementById('passwordProtectCheckbox');
+    const passwordOptions = document.getElementById('passwordOptions');
+    if (passwordProtectCheckbox) {
+        passwordProtectCheckbox.addEventListener('change', function() {
+            passwordOptions.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+    
+    document.getElementById('sendForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const recipient = document.getElementById('recipient').value;
+        const fileInput = document.getElementById('file');
+        const file = fileInput.files[0];
+        
+        if (!recipient) {
+            alert('Please enter a recipient username');
+            return;
+        }
+        if (!file) {
+            alert('Please select a file');
+            return;
+        }
+        
+        let options = {};
+        
+        const customExpiryCheckboxEl = document.getElementById('customExpiryCheckbox');
+        if (customExpiryCheckboxEl && customExpiryCheckboxEl.checked) {
+            const days = document.getElementById('customExpiryDays').value;
+            options.custom_expiry = parseInt(days);
+        }
+        
+        const passwordProtectCheckboxEl = document.getElementById('passwordProtectCheckbox');
+        if (passwordProtectCheckboxEl && passwordProtectCheckboxEl.checked) {
+            const password = document.getElementById('filePassword').value;
+            if (!password) {
+                alert('Please enter a password for the file');
+                return;
+            }
+            options.password_protected = true;
+            options.file_password = password;
+        }
+        
+        const userRole = "{{ user.role }}";
+        let maxSize = 1073741824;
+        if (userRole === 'pro') maxSize = 5368709120;
+        if (userRole === 'premium') maxSize = 10737418240;
+        if (userRole === 'owner') maxSize = Infinity;
+        
+        if (file.size > maxSize) {
+            alert('File too large. Maximum size for your role is ' + (maxSize / 1073741824).toFixed(1) + 'GB');
+            return;
+        }
+        
+        document.querySelector('.progress-container').style.display = 'block';
+        document.getElementById('submitBtn').disabled = true;
+        
+        try {
+            const key = await crypto.subtle.generateKey(
+                { name: "AES-GCM", length: 256 },
+                true,
+                ["encrypt", "decrypt"]
+            );
+            const fileData = await file.arrayBuffer();
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const encrypted = await crypto.subtle.encrypt(
+                { name: "AES-GCM", iv: iv },
+                key,
+                fileData
+            );
+            const combined = new Uint8Array(iv.length + encrypted.byteLength);
+            combined.set(iv, 0);
+            combined.set(new Uint8Array(encrypted), iv.length);
+            const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
+            
+            const formData = new FormData();
+            formData.append('recipient', recipient);
+            formData.append('filename', file.name);
+            formData.append('file_size', file.size.toString());
+            formData.append('options', JSON.stringify(options));
+            formData.append('encrypted_file', encryptedBlob, 'encrypted.bin');
+            formData.append('encryption_key', 'placeholder');
+            
+            const response = await fetch('/send/submit', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+            
+            if (result.success) {
+                alert('File sent successfully! The recipient will need to accept it.');
+                window.location.href = '/home';
+            } else {
+                alert('Error: ' + (result.error || 'Unknown error'));
+            }
+        } catch (error) {
+            alert('Error encrypting file: ' + error.message);
+        } finally {
+            document.querySelector('.progress-container').style.display = 'none';
+            document.getElementById('submitBtn').disabled = false;
+        }
+    });
+</script>
+{% endblock %}

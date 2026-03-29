@@ -1,0 +1,1146 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1>Admin Dashboard</h1>
+        <div class="admin-role-badge">Owner Access</div>
+    </div>
+    
+    <!-- Stats Cards - No Emojis -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">USERS</div>
+            <div class="stat-content">
+                <div class="stat-value">{{ stats.total_users }}</div>
+                <div class="stat-label">Total Users</div>
+                <div class="stat-change positive">+{{ users_by_role.free + users_by_role.pro + users_by_role.premium - 1200|default(0) }} this week</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">ACTIVE</div>
+            <div class="stat-content">
+                <div class="stat-value">{{ stats.active_users }}</div>
+                <div class="stat-label">Active Users</div>
+                <div class="stat-change positive">+5 this week</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">FILES</div>
+            <div class="stat-content">
+                <div class="stat-value">{{ stats.total_files }}</div>
+                <div class="stat-label">Total Files</div>
+                <div class="stat-change positive">+8 this week</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">STORAGE</div>
+            <div class="stat-content">
+                <div class="stat-value">{{ stats.total_storage }} GB</div>
+                <div class="stat-label">Storage Used</div>
+                <div class="stat-change positive">+15% this week</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Quick Stats Row -->
+    <div class="quick-stats">
+        <div class="quick-stat">
+            <span class="quick-stat-label">Free Users:</span>
+            <span class="quick-stat-value">{{ users_by_role.free }}</span>
+        </div>
+        <div class="quick-stat">
+            <span class="quick-stat-label">Pro Users:</span>
+            <span class="quick-stat-value">{{ users_by_role.pro }}</span>
+        </div>
+        <div class="quick-stat">
+            <span class="quick-stat-label">Premium Users:</span>
+            <span class="quick-stat-value">{{ users_by_role.premium }}</span>
+        </div>
+        <div class="quick-stat">
+            <span class="quick-stat-label">Banned Users:</span>
+            <span class="quick-stat-value">{{ users_by_role.banned }}</span>
+        </div>
+        <div class="quick-stat">
+            <span class="quick-stat-label">Pending Files:</span>
+            <span class="quick-stat-value">{{ files_by_status.pending }}</span>
+        </div>
+        <div class="quick-stat">
+            <span class="quick-stat-label">Expired Files:</span>
+            <span class="quick-stat-value">{{ files_by_status.expired }}</span>
+        </div>
+    </div>
+    
+    <!-- System Health -->
+    <div class="system-health">
+        <div class="health-item">
+            <span class="health-label">CPU:</span>
+            <span class="health-value">{{ system_health.cpu_percent }}%</span>
+            <div class="health-bar"><div class="health-fill" style="width: {{ system_health.cpu_percent }}%"></div></div>
+        </div>
+        <div class="health-item">
+            <span class="health-label">Memory:</span>
+            <span class="health-value">{{ system_health.memory_percent }}%</span>
+            <div class="health-bar"><div class="health-fill" style="width: {{ system_health.memory_percent }}%"></div></div>
+        </div>
+        <div class="health-item">
+            <span class="health-label">Disk:</span>
+            <span class="health-value">{{ system_health.disk_usage }}%</span>
+            <div class="health-bar"><div class="health-fill" style="width: {{ system_health.disk_usage }}%"></div></div>
+        </div>
+        <div class="health-item">
+            <span class="health-label">Uptime:</span>
+            <span class="health-value">{{ system_health.uptime.days }}d {{ (system_health.uptime.seconds // 3600) }}h</span>
+        </div>
+    </div>
+    
+    <!-- Search and Filters -->
+    <div class="admin-filters">
+        <div class="filter-group">
+            <input type="text" id="searchUser" placeholder="Search by username..." class="filter-input">
+        </div>
+        <div class="filter-group">
+            <select id="roleFilter" class="filter-select">
+                <option value="all">All Roles</option>
+                <option value="user">Free Users</option>
+                <option value="pro">Pro Users</option>
+                <option value="premium">Premium Users</option>
+                <option value="banned">Banned Users</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <select id="statusFilter" class="filter-select">
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="banned">Banned</option>
+            </select>
+        </div>
+        <button class="filter-refresh" onclick="searchUsers()">↻</button>
+    </div>
+    
+    <!-- Users Section - Compact -->
+    <div class="admin-section">
+        <div class="section-header">
+            <h2>Users</h2>
+            <span class="section-count">{{ stats.total_users }} total</span>
+        </div>
+        
+        <div class="users-list" id="usersList">
+            {% for u in top_users %}
+            <div class="user-card {% if u.is_banned %}banned{% endif %}" data-user-id="{{ u.id }}">
+                <div class="user-card-header">
+                    <div class="user-avatar">{{ u.username[0]|upper }}</div>
+                    <div class="user-info">
+                        <div class="user-name">{{ u.username }}</div>
+                        <div class="user-role-badge role-{{ u.role }}">{{ u.role }}</div>
+                    </div>
+                    <div class="user-status status-{{ 'banned' if u.is_banned else 'active' }}">
+                        {{ 'Banned' if u.is_banned else 'Active' }}
+                    </div>
+                </div>
+                <div class="user-details-compact">
+                    <span class="detail">ID: #{{ u.id }}</span>
+                    <span class="detail">Files: {{ u.file_count or 0 }}</span>
+                    <span class="detail">Storage: {{ (u.total_storage or 0) / (1024*1024*1024) | round(2) }} GB</span>
+                    <span class="detail">Created: {{ u.created_at.strftime('%Y-%m-%d') }}</span>
+                    <span class="detail">Last: {{ u.last_login.strftime('%Y-%m-%d') }}</span>
+                </div>
+                {% if u.ban_reason %}
+                <div class="ban-reason-compact">
+                    <span class="ban-label">Ban Reason:</span>
+                    <span class="ban-text">{{ u.ban_reason }}</span>
+                </div>
+                {% endif %}
+                <div class="user-actions-compact">
+                    {% if u.is_banned %}
+                    <button class="action-btn unban-btn" onclick="unbanUser({{ u.id }}, '{{ u.username }}')">Unban</button>
+                    {% else %}
+                    <button class="action-btn ban-btn" onclick="showBanModal({{ u.id }}, '{{ u.username }}')">Ban</button>
+                    {% endif %}
+                    <button class="action-btn role-btn" onclick="showRoleModal({{ u.id }}, '{{ u.username }}', '{{ u.role }}')">Role</button>
+                    <button class="action-btn info-btn" onclick="showUserDetails({{ u.id }})">Details</button>
+                    <button class="action-btn delete-btn" onclick="deleteUser({{ u.id }}, '{{ u.username }}')">Delete</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Files Section - Compact -->
+    <div class="admin-section">
+        <div class="section-header">
+            <h2>Recent Files</h2>
+            <span class="section-count">{{ recent_files|length }} shown</span>
+        </div>
+        
+        <div class="files-list" id="filesList">
+            {% for file in recent_files %}
+            <div class="file-card">
+                <div class="file-card-header">
+                    <div class="file-info">
+                        <div class="file-name">{{ file.filename }}</div>
+                        <div class="file-meta">{{ (file.file_size / (1024*1024)) | round(1) }} MB</div>
+                    </div>
+                    <div class="file-status status-{{ file.status }}">{{ file.status }}</div>
+                </div>
+                <div class="file-details-compact">
+                    <span class="detail">ID: #{{ file.id }}</span>
+                    <span class="detail">From: {{ file.sender.username }}</span>
+                    <span class="detail">To: {{ file.recipient.username }}</span>
+                    <span class="detail">Expires: {{ file.expires_at.strftime('%Y-%m-%d') }}</span>
+                </div>
+                <div class="file-actions-compact">
+                    <button class="action-btn delete-btn" onclick="deleteFile({{ file.id }}, '{{ file.filename }}')">Delete</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Failed Login Attempts -->
+    <div class="admin-section">
+        <div class="section-header">
+            <h2>Failed Login Attempts</h2>
+            <span class="section-count">{{ failed_logins|length }} users with attempts</span>
+        </div>
+        <div class="failed-logins-list">
+            {% for user in failed_logins %}
+            <div class="failed-login-item">
+                <span class="failed-username">{{ user.username }}</span>
+                <span class="failed-attempts">{{ user.failed_login_attempts }} attempts</span>
+                <span class="failed-time">Last: {{ user.last_failed_login.strftime('%Y-%m-%d %H:%M') if user.last_failed_login else 'Never' }}</span>
+            </div>
+            {% else %}
+            <div class="empty-state-compact">No failed login attempts recorded</div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- Ban Modal -->
+<div id="banModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Ban User</h3>
+            <button class="modal-close" onclick="closeModal('banModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>User: <strong id="banUsername"></strong></p>
+            <div class="form-group">
+                <label for="banReason">Ban Reason:</label>
+                <textarea id="banReason" rows="3" placeholder="Enter reason for banning this user..."></textarea>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeModal('banModal')">Cancel</button>
+            <button class="btn-danger" onclick="confirmBan()">Ban User</button>
+        </div>
+    </div>
+</div>
+
+<!-- Role Modal -->
+<div id="roleModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Change Role</h3>
+            <button class="modal-close" onclick="closeModal('roleModal')">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>User: <strong id="roleUsername"></strong></p>
+            <p>Current Role: <strong id="currentRole"></strong></p>
+            <div class="form-group">
+                <label>New Role:</label>
+                <div class="role-options">
+                    <label class="role-option">
+                        <input type="radio" name="newRole" value="user"> Free User
+                    </label>
+                    <label class="role-option">
+                        <input type="radio" name="newRole" value="pro"> Pro (5 USD/month)
+                    </label>
+                    <label class="role-option">
+                        <input type="radio" name="newRole" value="premium"> Premium (12 USD/month)
+                    </label>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeModal('roleModal')">Cancel</button>
+            <button class="btn-primary" onclick="confirmRoleChange()">Change Role</button>
+        </div>
+    </div>
+</div>
+
+<!-- User Details Modal -->
+<div id="infoModal" class="modal">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3>User Details</h3>
+            <button class="modal-close" onclick="closeModal('infoModal')">&times;</button>
+        </div>
+        <div class="modal-body" id="infoModalBody">
+            <div class="loading-spinner">Loading...</div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeModal('infoModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<style>
+/* Admin Container - Compact */
+.admin-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.admin-header h1 {
+    font-size: 1.6rem;
+    color: #5a2d8c;
+}
+
+body.dark .admin-header h1 {
+    color: #9b6bc1;
+}
+
+.admin-role-badge {
+    background: #5a2d8c;
+    color: white;
+    padding: 0.4rem 0.8rem;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+/* Stats Grid - Compact */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.stat-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border: 1px solid rgba(90, 45, 140, 0.1);
+}
+
+body.dark .stat-card {
+    background: #2a2a2a;
+}
+
+.stat-icon {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #5a2d8c;
+    background: rgba(90, 45, 140, 0.1);
+    padding: 0.5rem;
+    border-radius: 8px;
+    width: 50px;
+    text-align: center;
+}
+
+.stat-content {
+    flex: 1;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+body.dark .stat-value {
+    color: #e0e0e0;
+}
+
+.stat-label {
+    font-size: 0.7rem;
+    color: #888;
+}
+
+.stat-change {
+    font-size: 0.65rem;
+    margin-top: 0.25rem;
+}
+
+.stat-change.positive {
+    color: #2ecc71;
+}
+
+/* Quick Stats - Compact */
+.quick-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    background: rgba(90, 45, 140, 0.03);
+    border-radius: 8px;
+}
+
+.quick-stat {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.quick-stat-label {
+    color: #888;
+}
+
+.quick-stat-value {
+    font-weight: bold;
+    color: #5a2d8c;
+}
+
+/* System Health - Compact */
+.system-health {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    padding: 0.75rem;
+    background: rgba(90, 45, 140, 0.03);
+    border-radius: 8px;
+}
+
+.health-item {
+    flex: 1;
+    min-width: 120px;
+}
+
+.health-label {
+    font-size: 0.7rem;
+    color: #888;
+    display: inline-block;
+    width: 45px;
+}
+
+.health-value {
+    font-size: 0.7rem;
+    font-weight: bold;
+    margin-left: 0.25rem;
+}
+
+.health-bar {
+    background: #e0e0e0;
+    height: 4px;
+    border-radius: 2px;
+    margin-top: 0.25rem;
+}
+
+.health-fill {
+    background: #5a2d8c;
+    height: 4px;
+    border-radius: 2px;
+}
+
+/* Filters */
+.admin-filters {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.filter-group {
+    flex: 1;
+    min-width: 150px;
+}
+
+.filter-input, .filter-select {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    background: white;
+}
+
+body.dark .filter-input,
+body.dark .filter-select {
+    background: #2a2a2a;
+    border-color: #444;
+    color: white;
+}
+
+.filter-refresh {
+    background: #5a2d8c;
+    color: white;
+    border: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+/* Section Header */
+.admin-section {
+    margin-bottom: 1.5rem;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid rgba(90, 45, 140, 0.2);
+}
+
+.section-header h2 {
+    font-size: 1.1rem;
+    color: #5a2d8c;
+}
+
+.section-count {
+    font-size: 0.7rem;
+    color: #888;
+}
+
+/* Users List - Compact */
+.users-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.user-card {
+    background: white;
+    border-radius: 8px;
+    padding: 0.75rem;
+    border: 1px solid rgba(90, 45, 140, 0.1);
+}
+
+body.dark .user-card {
+    background: #2a2a2a;
+}
+
+.user-card.banned {
+    border-left: 3px solid #e74c3c;
+}
+
+.user-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.user-avatar {
+    width: 32px;
+    height: 32px;
+    background: #5a2d8c;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.9rem;
+}
+
+.user-info {
+    flex: 1;
+}
+
+.user-name {
+    font-weight: bold;
+    font-size: 0.9rem;
+}
+
+.user-role-badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.6rem;
+    font-weight: 600;
+    margin-top: 0.1rem;
+}
+
+.role-user { background: #95a5a6; color: white; }
+.role-pro { background: #f39c12; color: white; }
+.role-premium { background: #5a2d8c; color: white; }
+.role-owner { background: #2c3e50; color: white; }
+
+.user-status {
+    padding: 0.2rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.65rem;
+    font-weight: 600;
+}
+
+.status-active { background: #2ecc71; color: white; }
+.status-banned { background: #e74c3c; color: white; }
+
+.user-details-compact {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.7rem;
+    color: #888;
+}
+
+.user-details-compact .detail {
+    background: rgba(90, 45, 140, 0.05);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+}
+
+.ban-reason-compact {
+    font-size: 0.7rem;
+    margin-bottom: 0.5rem;
+    padding: 0.3rem;
+    background: rgba(231, 76, 60, 0.1);
+    border-radius: 4px;
+}
+
+.ban-label {
+    color: #e74c3c;
+    font-weight: 600;
+}
+
+.user-actions-compact {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    padding: 0.25rem 0.6rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 500;
+}
+
+.ban-btn { background: #e74c3c; color: white; }
+.unban-btn { background: #2ecc71; color: white; }
+.role-btn { background: #3498db; color: white; }
+.info-btn { background: #5a2d8c; color: white; }
+.delete-btn { background: #95a5a6; color: white; }
+
+/* Files List - Compact */
+.files-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.file-card {
+    background: white;
+    border-radius: 8px;
+    padding: 0.6rem;
+    border: 1px solid rgba(90, 45, 140, 0.1);
+}
+
+body.dark .file-card {
+    background: #2a2a2a;
+}
+
+.file-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.file-name {
+    font-weight: bold;
+    font-size: 0.85rem;
+}
+
+.file-meta {
+    font-size: 0.65rem;
+    color: #888;
+}
+
+.file-status {
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    font-size: 0.6rem;
+    font-weight: 600;
+}
+
+.status-pending { background: #f39c12; color: white; }
+.status-accepted { background: #2ecc71; color: white; }
+.status-declined { background: #e74c3c; color: white; }
+.status-downloaded { background: #3498db; color: white; }
+.status-expired { background: #95a5a6; color: white; }
+
+.file-details-compact {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.65rem;
+    color: #888;
+}
+
+.file-actions-compact {
+    text-align: right;
+}
+
+/* Failed Logins */
+.failed-logins-list {
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.failed-login-item {
+    display: flex;
+    gap: 1rem;
+    padding: 0.4rem;
+    border-bottom: 1px solid rgba(90, 45, 140, 0.1);
+    font-size: 0.75rem;
+}
+
+.failed-username {
+    font-weight: bold;
+    width: 100px;
+}
+
+.failed-attempts {
+    color: #e74c3c;
+    width: 80px;
+}
+
+.failed-time {
+    color: #888;
+}
+
+.empty-state-compact {
+    text-align: center;
+    padding: 1rem;
+    color: #888;
+    font-size: 0.8rem;
+}
+
+/* Modals */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    background-color: white;
+    margin: 5% auto;
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+}
+
+.modal-large {
+    max-width: 700px;
+}
+
+body.dark .modal-content {
+    background-color: #2a2a2a;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid #eee;
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: #5a2d8c;
+    font-size: 1.1rem;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #888;
+}
+
+.modal-body {
+    padding: 1.25rem;
+}
+
+.modal-footer {
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    font-size: 0.85rem;
+}
+
+.form-group textarea {
+    width: 100%;
+    padding: 0.6rem;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    resize: vertical;
+}
+
+.role-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.role-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.btn-primary, .btn-secondary, .btn-danger {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.btn-primary { background: #5a2d8c; color: white; }
+.btn-secondary { background: #95a5a6; color: white; }
+.btn-danger { background: #e74c3c; color: white; }
+
+.loading-spinner {
+    text-align: center;
+    padding: 2rem;
+    color: #888;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .quick-stats {
+        gap: 0.5rem;
+    }
+    .admin-filters {
+        flex-direction: column;
+    }
+    .filter-group {
+        width: 100%;
+    }
+    .user-details-compact {
+        gap: 0.5rem;
+    }
+    .user-details-compact .detail {
+        font-size: 0.6rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    .stat-card {
+        padding: 0.75rem;
+    }
+    .stat-value {
+        font-size: 1.2rem;
+    }
+}
+</style>
+
+<script>
+let currentUserId = null;
+let currentUsername = null;
+let currentRole = null;
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function searchUsers() {
+    const query = document.getElementById('searchUser').value;
+    const role = document.getElementById('roleFilter').value;
+    const status = document.getElementById('statusFilter').value;
+    
+    fetch(`/admin/search?q=${encodeURIComponent(query)}&role=${role}&status=${status}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                const usersList = document.getElementById('usersList');
+                usersList.innerHTML = data.users.map(u => `
+                    <div class="user-card ${u.is_banned ? 'banned' : ''}" data-user-id="${u.id}">
+                        <div class="user-card-header">
+                            <div class="user-avatar">${escapeHtml(u.username[0])}</div>
+                            <div class="user-info">
+                                <div class="user-name">${escapeHtml(u.username)}</div>
+                                <div class="user-role-badge role-${u.role}">${u.role}</div>
+                            </div>
+                            <div class="user-status status-${u.is_banned ? 'banned' : 'active'}">
+                                ${u.is_banned ? 'Banned' : 'Active'}
+                            </div>
+                        </div>
+                        <div class="user-details-compact">
+                            <span class="detail">ID: #${u.id}</span>
+                            <span class="detail">Files: ${u.files}</span>
+                            <span class="detail">Storage: ${u.storage_gb} GB</span>
+                            <span class="detail">Created: ${u.created_at}</span>
+                            <span class="detail">Last: ${u.last_login}</span>
+                        </div>
+                        ${u.ban_reason ? `
+                        <div class="ban-reason-compact">
+                            <span class="ban-label">Ban Reason:</span>
+                            <span class="ban-text">${escapeHtml(u.ban_reason)}</span>
+                        </div>
+                        ` : ''}
+                        <div class="user-actions-compact">
+                            ${u.is_banned ? 
+                                `<button class="action-btn unban-btn" onclick="unbanUser(${u.id}, '${escapeHtml(u.username)}')">Unban</button>` :
+                                `<button class="action-btn ban-btn" onclick="showBanModal(${u.id}, '${escapeHtml(u.username)}')">Ban</button>`
+                            }
+                            <button class="action-btn role-btn" onclick="showRoleModal(${u.id}, '${escapeHtml(u.username)}', '${u.role}')">Role</button>
+                            <button class="action-btn info-btn" onclick="showUserDetails(${u.id})">Details</button>
+                            <button class="action-btn delete-btn" onclick="deleteUser(${u.id}, '${escapeHtml(u.username)}')">Delete</button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        });
+}
+
+function showBanModal(userId, username) {
+    currentUserId = userId;
+    currentUsername = username;
+    document.getElementById('banUsername').textContent = username;
+    document.getElementById('banReason').value = '';
+    document.getElementById('banModal').style.display = 'block';
+}
+
+function confirmBan() {
+    const reason = document.getElementById('banReason').value;
+    if (!reason.trim()) {
+        alert('Please enter a ban reason');
+        return;
+    }
+    fetch(`/admin/user/ban/${currentUserId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'reason=' + encodeURIComponent(reason)
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    });
+    closeModal('banModal');
+}
+
+function unbanUser(userId, username) {
+    if (confirm(`Unban ${username}?`)) {
+        fetch(`/admin/user/unban/${userId}`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+    }
+}
+
+function showRoleModal(userId, username, role) {
+    currentUserId = userId;
+    currentUsername = username;
+    currentRole = role;
+    document.getElementById('roleUsername').textContent = username;
+    document.getElementById('currentRole').textContent = role.charAt(0).toUpperCase() + role.slice(1);
+    document.querySelectorAll('input[name="newRole"]').forEach(radio => {
+        radio.checked = (radio.value === role);
+    });
+    document.getElementById('roleModal').style.display = 'block';
+}
+
+function confirmRoleChange() {
+    const selectedRole = document.querySelector('input[name="newRole"]:checked');
+    if (!selectedRole) {
+        alert('Please select a new role');
+        return;
+    }
+    fetch(`/admin/user/role/${currentUserId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'role=' + selectedRole.value
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    });
+    closeModal('roleModal');
+}
+
+function showUserDetails(userId) {
+    fetch(`/admin/user/${userId}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                const modalBody = document.getElementById('infoModalBody');
+                const user = data.user;
+                const fileStats = data.file_stats;
+                const chatStats = data.chat_stats;
+                
+                modalBody.innerHTML = `
+                    <div class="user-detail-section">
+                        <h4>${escapeHtml(user.username)}</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item"><span class="detail-label">User ID:</span><span class="detail-value">#${user.id}</span></div>
+                            <div class="detail-item"><span class="detail-label">Role:</span><span class="detail-value">${user.role}</span></div>
+                            <div class="detail-item"><span class="detail-label">2FA:</span><span class="detail-value">${user.twofa_enabled ? 'Enabled' : 'Disabled'}</span></div>
+                            <div class="detail-item"><span class="detail-label">Created:</span><span class="detail-value">${new Date(user.created_at).toLocaleString()}</span></div>
+                            <div class="detail-item"><span class="detail-label">Last Login:</span><span class="detail-value">${new Date(user.last_login).toLocaleString()}</span></div>
+                            <div class="detail-item"><span class="detail-label">Status:</span><span class="detail-value">${user.is_banned ? 'Banned' : 'Active'}</span></div>
+                            ${user.ban_reason ? `<div class="detail-item full-width"><span class="detail-label">Ban Reason:</span><span class="detail-value">${escapeHtml(user.ban_reason)}</span></div>` : ''}
+                            ${user.subscription_expires_at ? `<div class="detail-item"><span class="detail-label">Subscription:</span><span class="detail-value">Expires ${new Date(user.subscription_expires_at).toLocaleDateString()}</span></div>` : ''}
+                        </div>
+                    </div>
+                    <div class="user-detail-section">
+                        <h4>File Statistics</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item"><span class="detail-label">Files Sent:</span><span class="detail-value">${fileStats.files_sent}</span></div>
+                            <div class="detail-item"><span class="detail-label">Storage Sent:</span><span class="detail-value">${fileStats.storage_sent_gb} GB</span></div>
+                            <div class="detail-item"><span class="detail-label">Files Received:</span><span class="detail-value">${fileStats.files_received}</span></div>
+                            <div class="detail-item"><span class="detail-label">Storage Received:</span><span class="detail-value">${fileStats.storage_received_gb} GB</span></div>
+                            <div class="detail-item"><span class="detail-label">Pending:</span><span class="detail-value">${fileStats.by_status.pending}</span></div>
+                            <div class="detail-item"><span class="detail-label">Accepted:</span><span class="detail-value">${fileStats.by_status.accepted}</span></div>
+                            <div class="detail-item"><span class="detail-label">Declined:</span><span class="detail-value">${fileStats.by_status.declined}</span></div>
+                            <div class="detail-item"><span class="detail-label">Downloaded:</span><span class="detail-value">${fileStats.by_status.downloaded}</span></div>
+                        </div>
+                    </div>
+                    <div class="user-detail-section">
+                        <h4>Chat Statistics</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item"><span class="detail-label">Active Chats:</span><span class="detail-value">${chatStats.active_chats}</span></div>
+                            <div class="detail-item"><span class="detail-label">Messages Sent:</span><span class="detail-value">${chatStats.messages_sent}</span></div>
+                        </div>
+                    </div>
+                    <div class="user-detail-section">
+                        <h4>Recent Files</h4>
+                        ${data.recent_files.length ? `
+                        <div class="recent-files-list">
+                            ${data.recent_files.map(f => `
+                                <div class="recent-file-item">
+                                    <span class="recent-filename">${escapeHtml(f.filename)}</span>
+                                    <span class="recent-filesize">${f.size_mb} MB</span>
+                                    <span class="recent-status status-${f.status}">${f.status}</span>
+                                    <span class="recent-date">${new Date(f.created_at).toLocaleDateString()}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        ` : '<div class="empty-state-compact">No recent files</div>'}
+                    </div>
+                `;
+                document.getElementById('infoModal').style.display = 'block';
+            } else {
+                alert('Error loading user details');
+            }
+        });
+}
+
+function deleteUser(userId, username) {
+    if (confirm(`Permanently delete user "${username}"? This action cannot be undone.`)) {
+        fetch(`/admin/user/delete/${userId}`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+    }
+}
+
+function deleteFile(fileId, filename) {
+    if (confirm(`Permanently delete file "${filename}"?`)) {
+        fetch(`/admin/file/delete/${fileId}`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    alert(data.message);
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            });
+    }
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+window.onclick = function(event) {
+    if (event.target.classList.contains('modal')) {
+        event.target.style.display = 'none';
+    }
+}
+</script>
+{% endblock %}

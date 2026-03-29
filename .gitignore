@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+*.log
+
+# Uploads
+uploads/*.enc
+uploads/*.bin
+!uploads/.gitkeep
+
+# Database
+*.db
+*.sqlite
+
+# Session files
+*.session
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+cleanup.log
+
+# Secret files
+*.key
+*.pem

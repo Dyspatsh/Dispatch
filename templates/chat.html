@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+
+{% block title %}Chat with {{ other_user.username }}{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+    <div class="chat-sidebar">
+        <h3>Active Chats</h3>
+        {% if active_conversations %}
+            {% for conv in active_conversations %}
+                {% set other = conv.user1 if conv.user2_id == user.id else conv.user2 %}
+                <a href="/chat/{{ other.id }}" class="chat-sidebar-item {% if other.id == other_user.id %}active{% endif %}">
+                    <div class="chat-sidebar-info">
+                        <span class="chat-sidebar-name">{{ other.username }}</span>
+                        {% if other.id in online_users %}
+                            <span class="online-dot"></span>
+                        {% endif %}
+                    </div>
+                    {% if conv.unread_count and conv.unread_count > 0 %}
+                        <span class="unread-badge">{{ conv.unread_count }}</span>
+                    {% endif %}
+                </a>
+            {% endfor %}
+        {% else %}
+        <p class="empty-message">No active chats</p>
+        {% endif %}
+    </div>
+    
+    <div class="chat-main">
+        <div class="chat-header">
+            <div class="chat-header-info">
+                <h2>{{ other_user.username }}</h2>
+                <div class="chat-status" id="chatStatus">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span class="status-text" id="statusText">Checking...</span>
+                </div>
+            </div>
+            {% if blocked_other %}
+                <button id="unblockBtn" class="btn btn-small btn-secondary" onclick="unblockUser()">Unblock User</button>
+            {% else %}
+                <button id="blockBtn" class="btn btn-small btn-danger" onclick="blockUser()">Block User</button>
+            {% endif %}
+            {% if blocked_by_other %}
+            <div class="blocked-warning">You are blocked by this user. You cannot send messages.</div>
+            {% endif %}
+        </div>
+        
+        <div class="chat-messages" id="chatMessages">
+            {% for msg in messages %}
+            <div class="message {% if msg.sender_id == user.id %}message-sent{% else %}message-received{% endif %}" data-message-id="{{ msg.id }}">
+                <div class="message-content">{{ msg.encrypted_content }}</div>
+                <div class="message-footer">
+                    <span class="message-time">{{ msg.created_at.strftime('%H:%M') }}</span>
+                    <span class="message-expiry" data-expires="{{ msg.expires_at.isoformat() }}"></span>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        
+        {% if not blocked_by_other and not blocked_other %}
+        <div class="chat-input-area">
+            <textarea id="messageInput" placeholder="Type your message..." maxlength="500" rows="3"></textarea>
+            <button id="sendBtn" class="btn btn-primary">Send</button>
+            <div class="char-counter">0 / 500</div>
+        </div>
+        {% else %}
+        <div class="chat-disabled">
+            <p>Messaging is disabled for this conversation.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    const conversationId = {{ conversation_id }};
+    const currentUserId = {{ user.id }};
+    const otherUserId = {{ other_user.id }};
+    const otherUsername = "{{ other_user.username }}";
+    const chatMessages = document.getElementById('chatMessages');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const charCounter = document.querySelector('.char-counter');
+    const maxChars = 500;
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+    
+    let ws = null;
+    let reconnectAttempts = 0;
+    let maxReconnectAttempts = 5;
+    let userScrolledUp = false;
+    let lastScrollTop = 0;
+    
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    function isScrolledToBottom() {
+        const threshold = 100;
+        const position = chatMessages.scrollTop + chatMessages.clientHeight;
+        const height = chatMessages.scrollHeight;
+        return position >= height - threshold;
+    }
+    
+    function scrollToBottomIfNeeded() {
+        if (!userScrolledUp) {
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    }
+    
+    chatMessages.addEventListener('scroll', function() {
+        const isAtBottom = isScrolledToBottom();
+        if (isAtBottom) {
+            userScrolledUp = false;
+        } else {
+            if (chatMessages.scrollTop < lastScrollTop) {
+                userScrolledUp = true;
+            }
+        }
+        lastScrollTop = chatMessages.scrollTop;
+    });
+    
+    if (messageInput) {
+        messageInput.addEventListener('input', () => {
+            const length = messageInput.value.length;
+            charCounter.textContent = length + ' / ' + maxChars;
+            if (length > maxChars) {
+                messageInput.value = messageInput.value.substring(0, maxChars);
+                charCounter.textContent = maxChars + ' / ' + maxChars;
+            }
+        });
+    }
+    
+    function connectWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/chat/ws/${conversationId}`;
+        
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = function() {
+            reconnectAttempts = 0;
+        };
+        
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'new_message') {
+                addMessageToChat(data.message, false);
+                scrollToBottomIfNeeded();
+            } else if (data.type === 'message_sent') {
+                const tempDiv = document.querySelector('.message[data-message-id="temp"]');
+                if (tempDiv) {
+                    tempDiv.setAttribute('data-message-id', data.message.id);
+                }
+            } else if (data.type === 'status') {
+                updateUserStatus(data.status);
+            }
+        };
+        
+        ws.onclose = function() {
+            updateUserStatus('offline');
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                setTimeout(connectWebSocket, 3000);
+            }
+        };
+    }
+    
+    function updateUserStatus(status) {
+        if (status === 'online') {
+            statusDot.className = 'status-dot online';
+            statusText.textContent = 'Online';
+        } else {
+            statusDot.className = 'status-dot offline';
+            statusText.textContent = 'Offline';
+        }
+    }
+    
+    function sendMessageViaWebSocket(content) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'message',
+                content: content
+            }));
+            return true;
+        }
+        return false;
+    }
+    
+    function addMessageToChat(message, isSentByCurrentUser) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message ' + (isSentByCurrentUser ? 'message-sent' : 'message-received');
+        messageDiv.setAttribute('data-message-id', message.id || 'temp');
+        const timeStr = new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        messageDiv.innerHTML = `
+            <div class="message-content">${escapeHtml(message.content)}</div>
+            <div class="message-footer">
+                <span class="message-time">${timeStr}</span>
+                <span class="message-expiry" data-expires="${message.expires_at}"></span>
+            </div>
+        `;
+        chatMessages.appendChild(messageDiv);
+        updateExpiryTimers();
+    }
+
+function sendMessage() {
+    const content = messageInput.value.trim();
+    if (!content) return;
+    if (content.length > maxChars) {
+        toast.error('Message exceeds character limit');
+        return;
+    }
+    
+    // ... rest of the function
+}
+
+function blockUser() {
+    if (confirm('Block ' + otherUsername + '? You will no longer receive messages from this user.')) {
+        fetch('/chat/block/' + otherUserId, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    toast.success('User blocked successfully');
+                    location.reload();
+                } else {
+                    toast.error(data.error || 'Failed to block user');
+                }
+            });
+    }
+}
+
+function unblockUser() {
+    if (confirm('Unblock ' + otherUsername + '? You will be able to send messages again.')) {
+        fetch('/chat/unblock/' + otherUserId, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    toast.success('User unblocked successfully');
+                    location.reload();
+                } else {
+                    toast.error(data.error || 'Failed to unblock user');
+                }
+            });
+    }
+}    
+    
+    function unblockUser() {
+        if (confirm('Unblock ' + otherUsername + '? You will be able to send messages again.')) {
+            fetch('/chat/unblock/' + otherUserId, { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                });
+        }
+    }
+    
+    function updateExpiryTimers() {
+        const expirySpans = document.querySelectorAll('.message-expiry');
+        const now = new Date();
+        expirySpans.forEach(span => {
+            const expiryTime = new Date(span.dataset.expires);
+            const diff = expiryTime - now;
+            if (diff <= 0) {
+                span.textContent = 'Expired';
+                span.closest('.message').style.opacity = '0.5';
+            } else {
+                const hours = Math.floor(diff / 3600000);
+                const minutes = Math.floor((diff % 3600000) / 60000);
+                const seconds = Math.floor((diff % 60000) / 1000);
+                span.textContent = `Expires in: ${hours}h ${minutes}m ${seconds}s`;
+            }
+        });
+    }
+    
+    if (sendBtn) {
+        sendBtn.addEventListener('click', sendMessage);
+    }
+    if (messageInput) {
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    }
+    
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    connectWebSocket();
+    updateExpiryTimers();
+    setInterval(updateExpiryTimers, 1000);
+</script>
+{% endblock %}

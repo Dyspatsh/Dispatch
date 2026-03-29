@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Account Recovery{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h1>Account Recovery</h1>
+    
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+    
+    {% if success %}
+    <div class="success">{{ success }}</div>
+    <div class="return-link">
+        <a href="/login" class="btn btn-primary">Go to Login</a>
+    </div>
+    {% else %}
+    <p>Enter your 64-character recovery phrase to recover your account. This will reset your password and PIN.</p>
+    
+    <form method="post" action="/recovery">
+        <div class="form-group">
+            <label for="recovery_phrase">Recovery Phrase</label>
+            <textarea id="recovery_phrase" name="recovery_phrase" rows="3" required placeholder="Enter your 64-character recovery phrase"></textarea>
+            <small>Your recovery phrase was provided when you registered your account.</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="new_password">New Password</label>
+            <input type="password" id="new_password" name="new_password" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="new_pin">New PIN (6 digits)</label>
+            <input type="password" id="new_pin" name="new_pin" maxlength="6" pattern="[0-9]{6}" required>
+            <small>Used for login security</small>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Recover Account</button>
+    </form>
+    <p><a href="/login">Back to Login</a></p>
+    {% endif %}
+</div>
+{% endblock %}

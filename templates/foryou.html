@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}ForYou{% endblock %}
+
+{% block content %}
+<div class="history-container">
+    <h1>Files Sent to You</h1>
+    <p>Files waiting for your action. Accept or decline them below.</p>
+    
+    {% if pending_files %}
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>From</th>
+                    <th>File Name</th>
+                    <th>File Size</th>
+                    <th>Date</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for file in pending_files %}
+                <tr data-file-id="{{ file.id }}">
+                    <td>{{ file.sender.username }}</td>
+                    <td>{{ file.filename }}</td>
+                    <td><span class="file-size">{% if file.file_size < 1024 %}{{ file.file_size }} B{% elif file.file_size < 1048576 %}{{ (file.file_size / 1024)|round(1) }} KB{% else %}{{ (file.file_size / 1048576)|round(1) }} MB{% endif %}</span></td>
+                    <td>{{ file.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td class="action-buttons">
+                        <button class="btn btn-small btn-success" onclick="acceptAndDownload({{ file.id }})">Accept & Download</button>
+                        <button class="btn btn-small btn-danger" onclick="declineFile({{ file.id }})">Decline</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-title">No pending files</div>
+        <div class="empty-state-message">When someone sends you a file, it will appear here for you to accept or decline.</div>
+        <a href="/send" class="btn btn-primary">Send a File</a>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+    function acceptAndDownload(fileId) {
+        const button = event.target;
+        const originalText = button.textContent;
+        button.textContent = 'Processing...';
+        button.disabled = true;
+        
+        fetch('/files/accept/' + fileId)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    window.location.href = '/files/download/' + fileId;
+                } else {
+                    if (window.toast) {
+                        window.toast.error(data.error || 'Error accepting file');
+                    } else {
+                        alert('Error accepting file: ' + (data.error || 'Unknown error'));
+                    }
+                    button.textContent = originalText;
+                    button.disabled = false;
+                }
+            })
+            .catch(error => {
+                if (window.toast) {
+                    window.toast.error('Error processing file: ' + error.message);
+                } else {
+                    alert('Error processing file: ' + error.message);
+                }
+                button.textContent = originalText;
+                button.disabled = false;
+            });
+    }
+    
+    function declineFile(fileId) {
+        if (confirm('Decline this file? It will be permanently deleted.')) {
+            window.location.href = '/files/decline/' + fileId;
+        }
+    }
+</script>
+{% endblock %}

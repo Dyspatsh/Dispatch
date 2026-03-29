@@ -1,0 +1,96 @@
+{% extends "simple_base.html" %}
+
+{% block title %}Terms of Service{% endblock %}
+
+{% block content %}
+<div class="terms">
+    <h1>Terms of Service</h1>
+    <p class="last-updated">Last Updated: March 29, 2026</p>
+    
+    <div class="terms-section">
+        <h2>1. Acceptance of Terms</h2>
+        <p>By registering for or using Dispatch, you agree to be bound by these Terms of Service. If you do not agree to these terms, please do not use the service.</p>
+    </div>
+    
+    <div class="terms-section">
+        <h2>2. Prohibited Content</h2>
+        <p>You may not use Dispatch to share illegal content, malware, or any material that violates applicable laws.</p>
+    </div>
+    
+    <div class="terms-section">
+        <h2>3. File Retention</h2>
+        <p>Files are automatically deleted after their expiration date. Free users have 7 days retention, Pro and Premium users have custom expiration options.</p>
+    </div>
+    
+    <div class="terms-section">
+        <h2>4. Privacy</h2>
+        <p>Dispatch does not log IP addresses. Files are encrypted client-side. Your privacy is our priority.</p>
+    </div>
+    
+    <div class="terms-section">
+        <h2>5. Account Termination</h2>
+        <p>We reserve the right to terminate accounts that violate these terms.</p>
+    </div>
+    
+    <div class="terms-section">
+        <h2>6. No Warranty</h2>
+        <p>Dispatch is provided "as is" without any warranties.</p>
+    </div>
+    
+    <div class="terms-section">
+        <h2>7. Changes to Terms</h2>
+        <p>We may update these terms at any time. Continued use constitutes acceptance.</p>
+    </div>
+    
+    <div class="terms-acceptance">
+        <p>By registering, you acknowledge that you have read and agree to these Terms of Service.</p>
+    </div>
+</div>
+
+<style>
+.terms {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+.terms h1 {
+    margin-bottom: 0.5rem;
+    text-align: center;
+}
+.last-updated {
+    text-align: center;
+    font-size: 0.875rem;
+    color: #888;
+    margin-bottom: 2rem;
+}
+.terms-section {
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #eee;
+}
+body.dark .terms-section {
+    border-bottom-color: #333;
+}
+.terms-section:last-child {
+    border-bottom: none;
+}
+.terms-section h2 {
+    margin-bottom: 1rem;
+    font-size: 1.25rem;
+    color: #5a2d8c;
+}
+.terms-acceptance {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: rgba(90, 45, 140, 0.05);
+    border-radius: 8px;
+    text-align: center;
+    font-weight: bold;
+}
+@media (max-width: 768px) {
+    .terms-section h2 {
+        font-size: 1.1rem;
+    }
+}
+</style>
+{% endblock %}

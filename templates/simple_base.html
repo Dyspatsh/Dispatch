@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>{% block title %}Dispatch{% endblock %} - Tor File Sharing</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="{{ user.theme if user else 'light' }}">
+    <nav class="simple-nav">
+        <div class="nav-container">
+            <a href="/home" class="logo">Dispatch</a>
+            {% if user %}
+            <div class="user-info">
+                <span class="username">{{ user.username }}</span>
+                <span class="user-role">{{ user.role }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </nav>
+    
+    <main>
+        <div class="return-button-top">
+            <a href="/home" class="btn btn-secondary">Return to Home</a>
+        </div>
+        
+        {% block content %}{% endblock %}
+        
+        <div class="return-button-bottom">
+            <a href="/home" class="btn btn-secondary">Return to Home</a>
+        </div>
+    </main>
+    
+    <footer>
+        <div class="footer-container">
+            <div class="footer-content">
+                <p class="footer-title">Dispatch - File Sharing Service</p>
+                <p class="copyright">&copy; 2026 Dispatch - All rights reserved</p>
+                <p class="version">Version 1.0</p>
+                <p class="contact">Contact: dispatsh@proton.me</p>
+            </div>
+        </div>
+    </footer>
+    
+    <script src="/static/script.js"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

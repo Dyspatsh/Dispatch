@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}2FA Verification{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h1>Two-Factor Authentication</h1>
+    <p>Please enter the 6-digit code from your authenticator app or one of your recovery codes.</p>
+    
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+    
+    <form method="post" action="/2fa-verify">
+        <div class="form-group">
+            <label for="code">Verification Code</label>
+            <input type="text" id="code" name="code" required placeholder="Enter your code or recovery phrase" maxlength="8">
+            <small>Enter the 6-digit code or 8-character recovery code</small>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Verify</button>
+    </form>
+</div>
+{% endblock %}
