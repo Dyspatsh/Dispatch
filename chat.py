@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import json
 import secrets
 import asyncio
+import re
 
 from database import get_db, User, ChatConversation, ChatMessage, BlockedUser, Session as DBSession
 from roles import check_chat_access, get_chat_char_limit
@@ -15,6 +16,11 @@ templates = Jinja2Templates(directory="templates")
 
 online_users = {}
 user_unread_counts = {}
+
+def escape_html(text: str) -> str:
+    if not text:
+        return ""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
 
 def get_current_user(db: Session, session_token: str = None):
     if not session_token:
@@ -152,6 +158,8 @@ async def send_message(recipient_id: int = Form(...), content: str = Form(...), 
     if not check_chat_access(user):
         return {"success": False, "error": "Chat access requires Pro or Premium subscription"}
     
+    content = escape_html(content)
+    
     char_limit = get_chat_char_limit(user)
     if char_limit > 0 and len(content) > char_limit:
         return {"success": False, "error": f"Message exceeds {char_limit} character limit"}
@@ -179,6 +187,123 @@ async def send_message(recipient_id: int = Form(...), content: str = Form(...), 
     increment_unread_count(recipient_id, conv.id)
     await manager.send_message(recipient_id, {"type": "new_message", "message": {"id": new_message.id, "sender_id": user.id, "sender_username": user.username, "content": content, "created_at": new_message.created_at.isoformat(), "expires_at": expires_at.isoformat()}, "unread_count": user_unread_counts.get(f"{recipient_id}_{conv.id}", 1)})
     return {"success": True, "message": {"id": new_message.id, "content": content, "created_at": new_message.created_at.isoformat(), "expires_at": expires_at.isoformat()}}
+
+@router.post("/invite")
+async def send_invitation(
+    username: str = Form(...),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    username = escape_html(username)
+    
+    if username == user.username:
+        return {"success": False, "error": "Cannot invite yourself"}
+    
+    recipient = db.query(User).filter(User.username == username).first()
+    if not recipient:
+        return {"success": False, "error": "User not found"}
+    
+    if is_blocked(db, user.id, recipient.id):
+        return {"success": False, "error": "You are blocked by this user"}
+    
+    if is_blocked(db, recipient.id, user.id):
+        return {"success": False, "error": "You have blocked this user"}
+    
+    existing = get_conversation(db, user.id, recipient.id)
+    if existing:
+        if existing.status == "active":
+            return {"success": False, "error": "You already have an active chat"}
+        elif existing.status == "pending":
+            return {"success": False, "error": "Invitation already pending"}
+    
+    new_conv = ChatConversation(
+        user1_id=user.id,
+        user2_id=recipient.id,
+        status="pending",
+        initiator_id=user.id
+    )
+    db.add(new_conv)
+    db.commit()
+    
+    return {"success": True, "message": "Invitation sent"}
+
+@router.post("/invite/accept/{conversation_id}")
+async def accept_invitation(
+    conversation_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    conv = db.query(ChatConversation).filter(ChatConversation.id == conversation_id).first()
+    if not conv:
+        return RedirectResponse(url="/chat", status_code=303)
+    
+    if conv.user1_id != user.id and conv.user2_id != user.id:
+        return RedirectResponse(url="/chat", status_code=303)
+    
+    if conv.initiator_id == user.id:
+        return RedirectResponse(url="/chat", status_code=303)
+    
+    conv.status = "active"
+    conv.updated_at = datetime.utcnow()
+    db.commit()
+    
+    other_user_id = conv.user1_id if conv.user2_id == user.id else conv.user2_id
+    return RedirectResponse(url=f"/chat/{other_user_id}", status_code=303)
+
+@router.post("/invite/decline/{conversation_id}")
+async def decline_invitation(
+    conversation_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    conv = db.query(ChatConversation).filter(ChatConversation.id == conversation_id).first()
+    if not conv:
+        return RedirectResponse(url="/chat", status_code=303)
+    
+    if conv.user1_id != user.id and conv.user2_id != user.id:
+        return RedirectResponse(url="/chat", status_code=303)
+    
+    db.delete(conv)
+    db.commit()
+    
+    return RedirectResponse(url="/chat", status_code=303)
+
+@router.post("/invite/cancel/{conversation_id}")
+async def cancel_invitation(
+    conversation_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    conv = db.query(ChatConversation).filter(ChatConversation.id == conversation_id).first()
+    if not conv:
+        return RedirectResponse(url="/chat", status_code=303)
+    
+    if conv.user1_id != user.id and conv.user2_id != user.id:
+        return RedirectResponse(url="/chat", status_code=303)
+    
+    if conv.initiator_id != user.id:
+        return RedirectResponse(url="/chat", status_code=303)
+    
+    db.delete(conv)
+    db.commit()
+    
+    return RedirectResponse(url="/chat", status_code=303)
 
 @router.post("/block/{user_id}")
 async def block_user(user_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
@@ -254,6 +379,8 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: int, session
             message_data = json.loads(data)
             if message_data.get("type") == "message":
                 content = message_data.get("content", "")
+                content = escape_html(content)
+                
                 char_limit = get_chat_char_limit(user)
                 if char_limit > 0 and len(content) > char_limit:
                     await websocket.send_json({"type": "error", "message": f"Message exceeds {char_limit} character limit"})

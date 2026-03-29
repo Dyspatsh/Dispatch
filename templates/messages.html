@@ -6,17 +6,6 @@
 <div class="messages-container">
     <h1>Messages</h1>
     
-    <div class="search-section">
-        <div class="form-group">
-            <label for="searchUser">Search User</label>
-            <div class="search-wrapper">
-                <input type="text" id="searchUser" placeholder="Enter username to invite...">
-                <button id="inviteBtn" class="btn btn-primary">Invite</button>
-            </div>
-            <div id="searchResult" class="search-result"></div>
-        </div>
-    </div>
-    
     <div class="messages-tabs">
         <button class="tab-button active" data-tab="received">Received</button>
         <button class="tab-button" data-tab="sent">Sent</button>
@@ -24,6 +13,17 @@
     </div>
     
     <div id="received-tab" class="tab-content active">
+        <div class="search-section">
+            <div class="form-group">
+                <label for="searchUser">Search User</label>
+                <div class="search-wrapper">
+                    <input type="text" id="searchUser" placeholder="Enter username to invite...">
+                    <button id="inviteBtn" class="btn btn-primary">Invite</button>
+                </div>
+                <div id="searchResult" class="search-result"></div>
+            </div>
+        </div>
+        
         <h2>Invitations Received</h2>
         {% if pending_invitations %}
             {% for invite in pending_invitations %}
@@ -43,10 +43,7 @@
             </div>
             {% endfor %}
         {% else %}
-        <div class="empty-state">
-            <div class="empty-state-title">No pending invitations</div>
-            <div class="empty-state-message">When someone invites you to chat, it will appear here.</div>
-        </div>
+        <p class="empty-message">No pending invitations</p>
         {% endif %}
     </div>
     
@@ -62,19 +59,7 @@
             </div>
             {% endfor %}
         {% else %}
-        <div class="empty-state">
-            <div class="empty-state-title">No sent invitations</div>
-            <div class="empty-state-message">Invitations you send will appear here.</div>
-            <div class="search-section" style="margin-top: 1rem;">
-                <div class="form-group">
-                    <label for="searchUserInvite">Invite someone to chat</label>
-                    <div class="search-wrapper">
-                        <input type="text" id="searchUserInvite" placeholder="Enter username...">
-                        <button id="inviteBtnSent" class="btn btn-primary">Invite</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <p class="empty-message">No sent invitations</p>
         {% endif %}
     </div>
     
@@ -100,19 +85,7 @@
             </div>
             {% endfor %}
         {% else %}
-        <div class="empty-state">
-            <div class="empty-state-title">No active chats</div>
-            <div class="empty-state-message">When you accept an invitation, chats will appear here.</div>
-            <div class="search-section" style="margin-top: 1rem;">
-                <div class="form-group">
-                    <label for="searchUserChat">Find users to chat with</label>
-                    <div class="search-wrapper">
-                        <input type="text" id="searchUserChat" placeholder="Enter username...">
-                        <button id="inviteBtnChat" class="btn btn-primary">Invite</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <p class="empty-message">No active chats</p>
         {% endif %}
     </div>
 </div>
@@ -233,26 +206,11 @@
     font-size: 0.75rem;
     color: #888;
 }
-.empty-state {
+.empty-message {
     text-align: center;
-    padding: 3rem 2rem;
-    background: rgba(90, 45, 140, 0.03);
-    border-radius: 12px;
-    border: 1px dashed rgba(90, 45, 140, 0.2);
-}
-.empty-state-title {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin-bottom: 0.5rem;
-    color: #5a2d8c;
-}
-body.dark .empty-state-title {
-    color: #9b6bc1;
-}
-.empty-state-message {
-    font-size: 0.875rem;
+    padding: 2rem;
     color: #888;
-    margin-bottom: 1rem;
+    font-style: italic;
 }
 @media (max-width: 768px) {
     .search-wrapper {
@@ -271,7 +229,6 @@ body.dark .empty-state-title {
 </style>
 
 <script>
-    // Tab switching
     const tabButtons = document.querySelectorAll('.tab-button');
     const tabContents = document.querySelectorAll('.tab-content');
     
@@ -285,80 +242,36 @@ body.dark .empty-state-title {
         });
     });
     
-    // Search function for all invite buttons
-    function setupSearch(inputId, buttonId) {
-        const searchInput = document.getElementById(inputId);
-        const inviteBtn = document.getElementById(buttonId);
-        const searchResult = document.getElementById('searchResult');
-        let debounceTimer;
-        
-        if (!searchInput || !inviteBtn) return;
-        
-        searchInput.addEventListener('input', () => {
-            clearTimeout(debounceTimer);
-            const query = searchInput.value.trim();
-            if (query.length < 2) {
-                if (searchResult) searchResult.innerHTML = '';
-                return;
-            }
-            debounceTimer = setTimeout(() => {
-                fetch('/search?q=' + encodeURIComponent(query))
-                    .then(res => res.json())
-                    .then(data => {
-                        if (searchResult) {
-                            if (data.users && data.users.length > 0) {
-                                searchResult.innerHTML = data.users.map(u => 
-                                    `<div class="search-user" onclick="selectUser('${escapeHtml(u.username)}', '${inputId}')">${escapeHtml(u.username)}</div>`
-                                ).join('');
-                            } else {
-                                searchResult.innerHTML = '<div class="search-no-result">User not found</div>';
-                            }
-                        }
-                    });
-            }, 300);
-        });
-        
-        inviteBtn.addEventListener('click', () => {
-            const username = searchInput.value.trim();
-            if (!username) {
-                if (window.toast) {
-                    window.toast.warning('Please enter a username');
-                } else {
-                    alert('Please enter a username');
-                }
-                return;
-            }
-            const formData = new FormData();
-            formData.append('username', username);
-            fetch('/chat/invite', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    if (window.toast) {
-                        window.toast.success(data.message);
-                    } else {
-                        alert(data.message);
-                    }
-                    location.reload();
-                } else {
-                    if (window.toast) {
-                        window.toast.error('Error: ' + data.error);
-                    } else {
-                        alert('Error: ' + data.error);
-                    }
-                }
-            });
-        });
-    }
+    const searchInput = document.getElementById('searchUser');
+    const inviteBtn = document.getElementById('inviteBtn');
+    const searchResult = document.getElementById('searchResult');
+    let debounceTimer;
     
-    function selectUser(username, inputId) {
-        const input = document.getElementById(inputId);
-        if (input) input.value = username;
-        const searchResult = document.getElementById('searchResult');
-        if (searchResult) searchResult.innerHTML = '';
+    searchInput.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        const query = searchInput.value.trim();
+        if (query.length < 2) {
+            searchResult.innerHTML = '';
+            return;
+        }
+        debounceTimer = setTimeout(() => {
+            fetch('/search?q=' + encodeURIComponent(query))
+                .then(res => res.json())
+                .then(data => {
+                    if (data.users && data.users.length > 0) {
+                        searchResult.innerHTML = data.users.map(u => 
+                            `<div class="search-user" onclick="selectUser('${escapeHtml(u.username)}')">${escapeHtml(u.username)}</div>`
+                        ).join('');
+                    } else {
+                        searchResult.innerHTML = '<div class="search-no-result">User not found</div>';
+                    }
+                });
+        }, 300);
+    });
+    
+    function selectUser(username) {
+        searchInput.value = username;
+        searchResult.innerHTML = '';
     }
     
     function escapeHtml(text) {
@@ -368,9 +281,27 @@ body.dark .empty-state-title {
         return div.innerHTML;
     }
     
-    // Setup search for each section
-    setupSearch('searchUser', 'inviteBtn');
-    setupSearch('searchUserInvite', 'inviteBtnSent');
-    setupSearch('searchUserChat', 'inviteBtnChat');
+    inviteBtn.addEventListener('click', () => {
+        const username = searchInput.value.trim();
+        if (!username) {
+            alert('Please enter a username');
+            return;
+        }
+        const formData = new FormData();
+        formData.append('username', username);
+        fetch('/chat/invite', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                alert(data.message);
+                location.reload();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        });
+    });
 </script>
 {% endblock %}

@@ -64,6 +64,12 @@ def generate_recovery_phrase() -> str:
     chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     return ''.join(secrets.choice(chars) for _ in range(64))
 
+def escape_html(text: str) -> str:
+    """Escape HTML to prevent XSS attacks - applies to ALL user inputs"""
+    if not text:
+        return ""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+
 def validate_username(username: str) -> tuple:
     if len(username) < 3:
         return False, "Username must be at least 3 characters"
@@ -114,6 +120,11 @@ def reset_login_attempts(username: str):
     if username in login_attempts:
         del login_attempts[username]
 
+def is_user_blocked(db: Session, user_id: int, target_id: int) -> bool:
+    """Check if target_id has blocked user_id"""
+    block = db.query(BlockedUser).filter(BlockedUser.user_id == target_id, BlockedUser.blocked_user_id == user_id).first()
+    return block is not None
+
 def create_session(db: Session, user_id: int, twofa_verified: bool = False) -> str:
     session_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(days=7)
@@ -159,11 +170,6 @@ def verify_recovery_code(db: Session, user_id: int, code: str) -> bool:
             db.commit()
             return True
     return False
-
-def escape_html(text: str) -> str:
-    if not text:
-        return ""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
 
 # Routes
 @app.get("/")
@@ -220,24 +226,60 @@ async def recovery_page(request: Request, user = Depends(get_user_from_session))
     return templates.TemplateResponse("recovery.html", {"request": request, "user": user})
 
 @app.post("/recovery")
-async def recovery_submit(request: Request, recovery_phrase: str = Form(...), new_password: str = Form(...), new_pin: str = Form(...), db: Session = Depends(get_db)):
+async def recovery_submit(
+    request: Request,
+    recovery_phrase: str = Form(...),
+    new_username: str = Form(None),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+    new_pin: str = Form(...),
+    confirm_pin: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    # Escape all inputs
+    recovery_phrase = escape_html(recovery_phrase)
+    new_username = escape_html(new_username) if new_username else None
+    
     users = db.query(User).all()
     user = None
     for u in users:
         if verify_password(recovery_phrase, u.recovery_phrase_hash):
             user = u
             break
+    
     if not user:
         return templates.TemplateResponse("recovery.html", {"request": request, "error": "Invalid recovery phrase"})
-    valid, error = validate_pin(new_pin)
-    if not valid:
-        return templates.TemplateResponse("recovery.html", {"request": request, "error": error})
+    
+    if new_password != confirm_password:
+        return templates.TemplateResponse("recovery.html", {"request": request, "error": "New passwords do not match"})
+    
     valid, error = validate_password(new_password)
     if not valid:
         return templates.TemplateResponse("recovery.html", {"request": request, "error": error})
+    
+    if new_pin != confirm_pin:
+        return templates.TemplateResponse("recovery.html", {"request": request, "error": "New PINs do not match"})
+    
+    valid, error = validate_pin(new_pin)
+    if not valid:
+        return templates.TemplateResponse("recovery.html", {"request": request, "error": error})
+    
     user.password_hash = hash_password(new_password)
     user.pin_hash = hash_password(new_pin)
+    
+    if new_username and new_username != user.username:
+        valid, error = validate_username(new_username)
+        if not valid:
+            return templates.TemplateResponse("recovery.html", {"request": request, "error": error})
+        
+        existing = db.query(User).filter(User.username == new_username).first()
+        if existing:
+            return templates.TemplateResponse("recovery.html", {"request": request, "error": "Username already taken"})
+        
+        user.username = new_username
+    
     db.commit()
+    
     return templates.TemplateResponse("recovery.html", {"request": request, "success": "Account recovered successfully! You can now log in with your new credentials."})
 
 @app.get("/register", response_class=HTMLResponse)
@@ -246,27 +288,43 @@ async def register_page(request: Request):
 
 @app.post("/register")
 async def register(request: Request, username: str = Form(...), password: str = Form(...), pin: str = Form(...), terms: bool = Form(False), db: Session = Depends(get_db)):
+    username = escape_html(username)
+    
     if not terms:
         return templates.TemplateResponse("register.html", {"request": request, "error": "You must accept the Terms of Service"})
+    
     valid, error = validate_username(username)
     if not valid:
         return templates.TemplateResponse("register.html", {"request": request, "error": error})
+    
     valid, error = validate_password(password)
     if not valid:
         return templates.TemplateResponse("register.html", {"request": request, "error": error})
+    
     valid, error = validate_pin(pin)
     if not valid:
         return templates.TemplateResponse("register.html", {"request": request, "error": error})
+    
     existing_user = db.query(User).filter(User.username == username).first()
     if existing_user:
         return templates.TemplateResponse("register.html", {"request": request, "error": "Username already exists"})
+    
     recovery_phrase = generate_recovery_phrase()
     user_count = db.query(User).count()
     role = "owner" if user_count == 0 else "user"
-    new_user = User(username=username, password_hash=hash_password(password), pin_hash=hash_password(pin), recovery_phrase_hash=hash_password(recovery_phrase), role=role)
+    
+    new_user = User(
+        username=username,
+        password_hash=hash_password(password),
+        pin_hash=hash_password(pin),
+        recovery_phrase_hash=hash_password(recovery_phrase),
+        role=role
+    )
+    
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    
     return templates.TemplateResponse("register.html", {"request": request, "success": "Account created!", "recovery_phrase": recovery_phrase})
 
 @app.get("/login", response_class=HTMLResponse)
@@ -275,27 +333,36 @@ async def login_page(request: Request):
 
 @app.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...), pin: str = Form(...), db: Session = Depends(get_db)):
+    username = escape_html(username)
+    
     locked, message = check_login_lockout(username)
     if locked:
         return templates.TemplateResponse("login.html", {"request": request, "error": message})
+    
     user = db.query(User).filter(User.username == username).first()
     if not user:
         record_failed_login(username)
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+    
     if not verify_password(password, user.password_hash):
         record_failed_login(username)
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+    
     if not verify_password(pin, user.pin_hash):
         record_failed_login(username)
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
+    
     if user.is_banned:
         return templates.TemplateResponse("login.html", {"request": request, "error": f"Account banned: {user.ban_reason}"})
+    
     reset_login_attempts(username)
+    
     if user.totp_enabled:
         session_token = create_session(db, user.id, twofa_verified=False)
         response = RedirectResponse(url="/2fa-verify", status_code=303)
         response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False, samesite="lax", max_age=300)
         return response
+    
     user.last_login = datetime.utcnow()
     db.commit()
     session_token = create_session(db, user.id, twofa_verified=True)
@@ -318,10 +385,12 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
     if not db_session:
         return RedirectResponse(url="/login", status_code=303)
     user = db_session.user
+    
     if not user.totp_enabled:
         db_session.twofa_verified = True
         db.commit()
         return RedirectResponse(url="/home", status_code=303)
+    
     totp = pyotp.TOTP(user.totp_secret)
     if totp.verify(code):
         db_session.twofa_verified = True
@@ -332,6 +401,7 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
         response = RedirectResponse(url="/home", status_code=303)
         response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False, samesite="lax", max_age=604800)
         return response
+    
     if verify_recovery_code(db, user.id, code):
         db_session.twofa_verified = True
         db_session.expires_at = datetime.utcnow() + timedelta(days=7)
@@ -341,6 +411,7 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
         response = RedirectResponse(url="/home", status_code=303)
         response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False, samesite="lax", max_age=604800)
         return response
+    
     return templates.TemplateResponse("2fa_verify.html", {"request": request, "error": "Invalid verification code"})
 
 @app.get("/profile", response_class=HTMLResponse)
@@ -475,14 +546,27 @@ async def send_page(request: Request, user = Depends(get_user_from_session)):
 async def submit_file(recipient: str = Form(...), filename: str = Form(...), file_size: str = Form(...), options: str = Form(...), encrypted_file: UploadFile = FastAPIFile(...), encryption_key: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return {"success": False, "error": "Not authenticated"}
+    
+    recipient = escape_html(recipient)
     filename = escape_html(filename)
+    
     try:
         file_size_int = int(file_size)
     except:
         file_size_int = 0
+    
     recipient_user = db.query(User).filter(User.username == recipient).first()
     if not recipient_user:
         return {"success": False, "error": "Recipient not found"}
+    
+    if recipient_user.id == user.id:
+        return {"success": False, "error": "You cannot send files to yourself"}
+    
+    if is_user_blocked(db, user.id, recipient_user.id):
+        return {"success": False, "error": "You are blocked by this user"}
+    
+    if is_user_blocked(db, recipient_user.id, user.id):
+        return {"success": False, "error": "You have blocked this user"}
     
     from roles import get_file_limits
     limits = get_file_limits(user)
@@ -498,7 +582,7 @@ async def submit_file(recipient: str = Form(...), filename: str = Form(...), fil
     except:
         opts = {}
     if opts.get("password_protected") and opts.get("file_password"):
-        opts["file_password_hash"] = hash_password(opts["file_password"])
+        opts["file_password_hash"] = hash_password(escape_html(opts["file_password"]))
         del opts["file_password"]
     
     pending_expiry = datetime.utcnow() + timedelta(hours=72)
@@ -587,8 +671,13 @@ async def search_users(q: str, user = Depends(get_user_from_session), db: Sessio
     if not user:
         return {"users": []}
     q = escape_html(q)
-    users = db.query(User).filter(User.username.ilike(f"%{q}%"), User.id != user.id).limit(10).all()
-    return {"users": [{"id": u.id, "username": escape_html(u.username)} for u in users]}
+    users = db.query(User).filter(
+        User.username.ilike(f"%{q}%"),
+        User.id != user.id,
+        User.is_banned == False,
+        User.role.in_(['pro', 'premium', 'owner'])
+    ).limit(10).all()
+    return {"users": [{"id": u.id, "username": u.username} for u in users]}
 
 @app.get("/logout")
 async def logout():
@@ -602,14 +691,12 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
     if not user or user.role != "owner":
         return RedirectResponse(url="/home", status_code=303)
     
-    # Stats
     total_users = db.query(User).count()
     active_users = db.query(User).filter(User.last_login > datetime.utcnow() - timedelta(days=7)).count()
     total_files = db.query(File).count()
     total_storage = db.query(func.sum(File.file_size)).scalar() or 0
     total_storage_gb = round(total_storage / (1024 * 1024 * 1024), 1)
     
-    # Users by role
     users_by_role = {
         "free": db.query(User).filter(User.role == "user", User.is_banned == False).count(),
         "pro": db.query(User).filter(User.role == "pro", User.is_banned == False).count(),
@@ -618,7 +705,6 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
         "banned": db.query(User).filter(User.is_banned == True).count()
     }
     
-    # Files by status
     files_by_status = {
         "pending": db.query(File).filter(File.status == "pending").count(),
         "accepted": db.query(File).filter(File.status == "accepted").count(),
@@ -627,17 +713,14 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
         "expired": db.query(File).filter(File.expires_at < datetime.utcnow()).count()
     }
     
-    # Users with file counts
     users = db.query(
         User.id, User.username, User.role, User.created_at, User.last_login, 
         User.is_banned, User.ban_reason, User.subscription_expires_at,
         func.count(File.id).label("file_count")
     ).outerjoin(File, File.sender_id == User.id).group_by(User.id).order_by(desc("file_count")).limit(50).all()
     
-    # Recent files
     files = db.query(File).order_by(desc(File.created_at)).limit(30).all()
     
-    # System health
     system_health = {
         "cpu_percent": psutil.cpu_percent(interval=1),
         "memory_percent": psutil.virtual_memory().percent,
@@ -645,7 +728,6 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
         "uptime": str(datetime.utcnow() - datetime.fromtimestamp(psutil.boot_time())).split('.')[0]
     }
     
-    # Active logs
     active_logs = []
     recent_logins = db.query(User).filter(User.last_login > datetime.utcnow() - timedelta(hours=24)).order_by(desc(User.last_login)).limit(10).all()
     for log in recent_logins:
@@ -659,7 +741,6 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
     active_logs.sort(key=lambda x: x["time"], reverse=True)
     active_logs = active_logs[:30]
     
-    # Failed login attempts
     failed_logins = db.query(User).filter(User.failed_login_attempts > 0).order_by(desc(User.last_failed_login)).limit(20).all()
     
     return templates.TemplateResponse("admin_simple.html", {

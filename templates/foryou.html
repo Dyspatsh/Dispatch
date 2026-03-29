@@ -24,11 +24,12 @@
                 <tr data-file-id="{{ file.id }}">
                     <td>{{ file.sender.username }}</td>
                     <td>{{ file.filename }}</td>
-                    <td><span class="file-size">{% if file.file_size < 1024 %}{{ file.file_size }} B{% elif file.file_size < 1048576 %}{{ (file.file_size / 1024)|round(1) }} KB{% else %}{{ (file.file_size / 1048576)|round(1) }} MB{% endif %}</span></td>
+                    <td>{{ (file.file_size / 1048576)|round(2) }} MB</td>
                     <td>{{ file.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td class="action-buttons">
                         <button class="btn btn-small btn-success" onclick="acceptAndDownload({{ file.id }})">Accept & Download</button>
                         <button class="btn btn-small btn-danger" onclick="declineFile({{ file.id }})">Decline</button>
+                        <button class="btn btn-small btn-warning" onclick="blockSender({{ file.sender.id }}, '{{ file.sender.username }}')">Block User</button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -36,11 +37,7 @@
         </table>
     </div>
     {% else %}
-    <div class="empty-state">
-        <div class="empty-state-title">No pending files</div>
-        <div class="empty-state-message">When someone sends you a file, it will appear here for you to accept or decline.</div>
-        <a href="/send" class="btn btn-primary">Send a File</a>
-    </div>
+    <p class="empty-message">No pending files. Check your History page for received files.</p>
     {% endif %}
 </div>
 
@@ -57,21 +54,13 @@
                 if (data.success) {
                     window.location.href = '/files/download/' + fileId;
                 } else {
-                    if (window.toast) {
-                        window.toast.error(data.error || 'Error accepting file');
-                    } else {
-                        alert('Error accepting file: ' + (data.error || 'Unknown error'));
-                    }
+                    alert('Error accepting file: ' + (data.error || 'Unknown error'));
                     button.textContent = originalText;
                     button.disabled = false;
                 }
             })
             .catch(error => {
-                if (window.toast) {
-                    window.toast.error('Error processing file: ' + error.message);
-                } else {
-                    alert('Error processing file: ' + error.message);
-                }
+                alert('Error processing file: ' + error.message);
                 button.textContent = originalText;
                 button.disabled = false;
             });
@@ -80,6 +69,21 @@
     function declineFile(fileId) {
         if (confirm('Decline this file? It will be permanently deleted.')) {
             window.location.href = '/files/decline/' + fileId;
+        }
+    }
+    
+    function blockSender(userId, username) {
+        if (confirm('Block ' + username + '? You will no longer receive files or chat invitations from this user.')) {
+            fetch('/chat/block/' + userId, { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('User blocked successfully');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Failed to block user'));
+                    }
+                });
         }
     }
 </script>

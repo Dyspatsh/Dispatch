@@ -204,47 +204,69 @@
         chatMessages.appendChild(messageDiv);
         updateExpiryTimers();
     }
-
-function sendMessage() {
-    const content = messageInput.value.trim();
-    if (!content) return;
-    if (content.length > maxChars) {
-        toast.error('Message exceeds character limit');
-        return;
+    
+    function sendMessage() {
+        const content = messageInput.value.trim();
+        if (!content) return;
+        if (content.length > maxChars) {
+            alert('Message exceeds character limit');
+            return;
+        }
+        
+        const tempMessage = {
+            id: 'temp',
+            content: content,
+            created_at: new Date().toISOString(),
+            expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        };
+        
+        addMessageToChat(tempMessage, true);
+        messageInput.value = '';
+        charCounter.textContent = '0 / ' + maxChars;
+        scrollToBottomIfNeeded();
+        
+        if (!sendMessageViaWebSocket(content)) {
+            const formData = new FormData();
+            formData.append('recipient_id', otherUserId);
+            formData.append('content', content);
+            fetch('/chat/send', {
+                method: 'POST',
+                body: formData
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    const tempDiv = document.querySelector('.message[data-message-id="temp"]');
+                    if (tempDiv) {
+                        tempDiv.setAttribute('data-message-id', data.message.id);
+                    }
+                } else {
+                    alert('Error: ' + data.error);
+                    const tempDiv = document.querySelector('.message[data-message-id="temp"]');
+                    if (tempDiv) tempDiv.remove();
+                }
+            })
+            .catch(err => {
+                alert('Error sending message: ' + err.message);
+                const tempDiv = document.querySelector('.message[data-message-id="temp"]');
+                if (tempDiv) tempDiv.remove();
+            });
+        }
     }
     
-    // ... rest of the function
-}
-
-function blockUser() {
-    if (confirm('Block ' + otherUsername + '? You will no longer receive messages from this user.')) {
-        fetch('/chat/block/' + otherUserId, { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    toast.success('User blocked successfully');
-                    location.reload();
-                } else {
-                    toast.error(data.error || 'Failed to block user');
-                }
-            });
+    function blockUser() {
+        if (confirm('Block ' + otherUsername + '? You will no longer receive messages from this user.')) {
+            fetch('/chat/block/' + otherUserId, { method: 'POST' })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                });
+        }
     }
-}
-
-function unblockUser() {
-    if (confirm('Unblock ' + otherUsername + '? You will be able to send messages again.')) {
-        fetch('/chat/unblock/' + otherUserId, { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    toast.success('User unblocked successfully');
-                    location.reload();
-                } else {
-                    toast.error(data.error || 'Failed to unblock user');
-                }
-            });
-    }
-}    
     
     function unblockUser() {
         if (confirm('Unblock ' + otherUsername + '? You will be able to send messages again.')) {

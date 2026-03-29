@@ -65,8 +65,18 @@
         </div>
         
         <div class="progress-container" style="display:none;">
-            <div class="progress-bar"></div>
-            <p class="progress-text">Encrypting and uploading...</p>
+            <div class="progress-bar-wrapper">
+                <div class="progress-bar" id="progressBar" style="width: 0%;"></div>
+            </div>
+            <div class="progress-stats">
+                <span class="progress-percent" id="progressPercent">0%</span>
+                <span class="progress-speed" id="progressSpeed">0 KB/s</span>
+                <span class="progress-time" id="progressTime">0s remaining</span>
+            </div>
+            <div class="progress-phase" id="progressPhase">Encrypting...</div>
+            <div class="cancel-container" style="margin-top: 0.5rem;">
+                <button type="button" id="cancelUploadBtn" class="btn btn-danger btn-small" style="display:none;">Cancel Upload</button>
+            </div>
         </div>
         
         <button type="submit" id="submitBtn" class="btn btn-primary">Send File</button>
@@ -221,19 +231,37 @@ body.dark .checkmark {
     padding: 1rem;
     background: rgba(90, 45, 140, 0.1);
     border-radius: 8px;
-    text-align: center;
+}
+.progress-bar-wrapper {
+    background: #e0e0e0;
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
 }
 .progress-bar {
-    width: 0%;
-    height: 8px;
     background: #5a2d8c;
+    height: 8px;
     border-radius: 4px;
-    animation: progress 1s ease-in-out infinite;
+    transition: width 0.3s ease;
+    width: 0%;
 }
-@keyframes progress {
-    0% { width: 0%; }
-    50% { width: 70%; }
-    100% { width: 100%; }
+.progress-stats {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+    font-size: 0.7rem;
+    color: #888;
+}
+.progress-phase {
+    text-align: center;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: #5a2d8c;
+    font-weight: 500;
+}
+.btn-small {
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
 }
 .role-features-section {
     margin-top: 2rem;
@@ -279,10 +307,17 @@ body.dark .checkmark {
     .options-grid {
         grid-template-columns: 1fr;
     }
+    .progress-stats {
+        flex-direction: column;
+        gap: 0.25rem;
+        text-align: center;
+    }
 }
 </style>
 
 <script>
+    let currentXHR = null;
+    
     const customExpiryCheckbox = document.getElementById('customExpiryCheckbox');
     const customExpiryOptions = document.getElementById('customExpiryOptions');
     if (customExpiryCheckbox) {
@@ -345,8 +380,25 @@ body.dark .checkmark {
             return;
         }
         
-        document.querySelector('.progress-container').style.display = 'block';
+        const progressContainer = document.querySelector('.progress-container');
+        const progressBar = document.getElementById('progressBar');
+        const progressPercent = document.getElementById('progressPercent');
+        const progressSpeed = document.getElementById('progressSpeed');
+        const progressTime = document.getElementById('progressTime');
+        const progressPhase = document.getElementById('progressPhase');
+        const cancelBtn = document.getElementById('cancelUploadBtn');
+        
+        progressContainer.style.display = 'block';
+        cancelBtn.style.display = 'block';
         document.getElementById('submitBtn').disabled = true;
+        
+        let startTime = Date.now();
+        let lastLoaded = 0;
+        let lastTime = startTime;
+        
+        progressPhase.textContent = 'Encrypting file...';
+        progressBar.style.width = '25%';
+        progressPercent.textContent = '25%';
         
         try {
             const key = await crypto.subtle.generateKey(
@@ -354,17 +406,28 @@ body.dark .checkmark {
                 true,
                 ["encrypt", "decrypt"]
             );
+            
             const fileData = await file.arrayBuffer();
+            
+            progressPhase.textContent = 'Uploading file...';
+            progressBar.style.width = '50%';
+            progressPercent.textContent = '50%';
+            
             const iv = crypto.getRandomValues(new Uint8Array(12));
             const encrypted = await crypto.subtle.encrypt(
                 { name: "AES-GCM", iv: iv },
                 key,
                 fileData
             );
+            
             const combined = new Uint8Array(iv.length + encrypted.byteLength);
             combined.set(iv, 0);
             combined.set(new Uint8Array(encrypted), iv.length);
             const encryptedBlob = new Blob([combined], { type: 'application/octet-stream' });
+            
+            progressPhase.textContent = 'Sending to server...';
+            progressBar.style.width = '75%';
+            progressPercent.textContent = '75%';
             
             const formData = new FormData();
             formData.append('recipient', recipient);
@@ -374,23 +437,109 @@ body.dark .checkmark {
             formData.append('encrypted_file', encryptedBlob, 'encrypted.bin');
             formData.append('encryption_key', 'placeholder');
             
-            const response = await fetch('/send/submit', {
-                method: 'POST',
-                body: formData
+            currentXHR = new XMLHttpRequest();
+            
+            currentXHR.upload.addEventListener('progress', function(e) {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    const adjustedPercent = 75 + Math.round(percent * 0.25);
+                    progressBar.style.width = adjustedPercent + '%';
+                    progressPercent.textContent = adjustedPercent + '%';
+                    
+                    const now = Date.now();
+                    const timeDiff = (now - lastTime) / 1000;
+                    const bytesDiff = e.loaded - lastLoaded;
+                    
+                    if (timeDiff > 0) {
+                        const speed = bytesDiff / timeDiff;
+                        let speedText = '';
+                        if (speed > 1024 * 1024) {
+                            speedText = (speed / (1024 * 1024)).toFixed(1) + ' MB/s';
+                        } else if (speed > 1024) {
+                            speedText = (speed / 1024).toFixed(1) + ' KB/s';
+                        } else {
+                            speedText = speed.toFixed(0) + ' B/s';
+                        }
+                        progressSpeed.textContent = speedText;
+                        
+                        const remaining = e.total - e.loaded;
+                        const remainingTime = remaining / speed;
+                        if (remainingTime > 0) {
+                            if (remainingTime > 60) {
+                                progressTime.textContent = Math.round(remainingTime / 60) + 'm remaining';
+                            } else {
+                                progressTime.textContent = Math.round(remainingTime) + 's remaining';
+                            }
+                        }
+                    }
+                    
+                    lastLoaded = e.loaded;
+                    lastTime = now;
+                }
             });
-            const result = await response.json();
+            
+            cancelBtn.onclick = function() {
+                if (currentXHR) {
+                    currentXHR.abort();
+                    alert('Upload cancelled');
+                    location.reload();
+                }
+            };
+            
+            const uploadPromise = new Promise((resolve, reject) => {
+                currentXHR.onload = function() {
+                    if (currentXHR.status === 200) {
+                        try {
+                            const result = JSON.parse(currentXHR.responseText);
+                            resolve(result);
+                        } catch (e) {
+                            reject(new Error('Invalid response'));
+                        }
+                    } else {
+                        reject(new Error('Upload failed: ' + currentXHR.status));
+                    }
+                };
+                currentXHR.onerror = function() {
+                    reject(new Error('Network error'));
+                };
+                currentXHR.ontimeout = function() {
+                    reject(new Error('Upload timeout'));
+                };
+                currentXHR.onabort = function() {
+                    reject(new Error('Upload cancelled'));
+                };
+            });
+            
+            currentXHR.open('POST', '/send/submit');
+            currentXHR.send(formData);
+            
+            const result = await uploadPromise;
             
             if (result.success) {
+                progressPhase.textContent = 'Complete!';
+                progressBar.style.width = '100%';
+                progressPercent.textContent = '100%';
                 alert('File sent successfully! The recipient will need to accept it.');
                 window.location.href = '/home';
             } else {
                 alert('Error: ' + (result.error || 'Unknown error'));
             }
+            
         } catch (error) {
-            alert('Error encrypting file: ' + error.message);
+            if (error.message !== 'Upload cancelled') {
+                alert('Error: ' + error.message);
+            }
         } finally {
-            document.querySelector('.progress-container').style.display = 'none';
-            document.getElementById('submitBtn').disabled = false;
+            setTimeout(() => {
+                progressContainer.style.display = 'none';
+                cancelBtn.style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
+                progressBar.style.width = '0%';
+                progressPercent.textContent = '0%';
+                progressSpeed.textContent = '0 KB/s';
+                progressTime.textContent = '0s remaining';
+                currentXHR = null;
+            }, 1000);
         }
     });
 </script>

@@ -61,24 +61,22 @@
 </div>
 
 <div id="upgradeModal" class="modal">
-    <div class="modal-content">
-        <span class="close" onclick="closeModal()">&times;</span>
-        <h2>Upgrade to <span id="selectedPlan"></span></h2>
-        <p>To upgrade your account, please send an email to <strong>dispatsh@proton.me</strong> with the following information:</p>
-        <div class="modal-instructions">
-            <p><strong>Subject:</strong> Upgrade Request - <span id="planSubject"></span></p>
-            <p><strong>Body:</strong></p>
+    <div class="modal-content modal-small">
+        <div class="modal-header">
+            <h3>Upgrade to <span id="selectedPlan"></span></h3>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p>To upgrade your account, please send an email to <strong>dispatsh@proton.me</strong> with:</p>
             <div class="email-template">
                 Username: {{ user.username }}<br>
-                Requested Plan: <span id="planBody"></span><br>
-                <br>
-                I would like to upgrade my account. Please provide your Monero wallet address so I can send the payment.<br>
-                <br>
-                Thank you.
+                Requested Plan: <span id="planBody"></span>
             </div>
+            <p class="modal-note">You will receive a Monero wallet address for payment. Once confirmed, your account will be upgraded within 24 hours.</p>
         </div>
-        <p class="modal-note">After sending the email, you will receive a Monero wallet address. Once payment is confirmed, your account will be upgraded within 24 hours.</p>
-        <button class="btn btn-primary" onclick="closeModal()">Close</button>
+        <div class="modal-footer">
+            <button class="btn-primary" onclick="closeModal()">Close</button>
+        </div>
     </div>
 </div>
 
@@ -159,59 +157,70 @@
     background-color: rgba(0, 0, 0, 0.5);
 }
 .modal-content {
-    background-color: #fff;
-    margin: 10% auto;
-    padding: 2rem;
+    background-color: white;
+    margin: 15% auto;
     border-radius: 12px;
     width: 90%;
-    max-width: 500px;
-    position: relative;
+    max-width: 380px;
+}
+.modal-small {
+    max-width: 350px;
 }
 body.dark .modal-content {
     background-color: #2a2a2a;
-    color: #f5f5f5;
 }
-.close {
-    position: absolute;
-    right: 1.5rem;
-    top: 1rem;
-    font-size: 1.5rem;
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid #eee;
+}
+.modal-header h3 {
+    margin: 0;
+    color: #5a2d8c;
+    font-size: 1.1rem;
+}
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
     cursor: pointer;
 }
-.close:hover {
-    color: #ff4444;
-}
-.modal-instructions {
-    background: #f5f5f5;
+.modal-body {
     padding: 1rem;
-    border-radius: 8px;
-    margin: 1rem 0;
 }
-body.dark .modal-instructions {
-    background: #1a1a1a;
+.modal-footer {
+    padding: 0.75rem;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: center;
 }
 .email-template {
-    background: #fff;
-    padding: 1rem;
-    border-radius: 4px;
+    background: #f5f5f5;
+    padding: 0.75rem;
+    border-radius: 6px;
     font-family: monospace;
-    font-size: 0.875rem;
-    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    margin: 0.75rem 0;
     border: 1px solid #ddd;
 }
 body.dark .email-template {
-    background: #333;
-    border-color: #555;
+    background: #1a1a1a;
+    border-color: #444;
 }
 .modal-note {
-    font-size: 0.875rem;
-    color: #666;
-    margin: 1rem 0;
+    font-size: 0.75rem;
+    color: #888;
+    margin-top: 0.5rem;
 }
 @media (max-width: 768px) {
     .pricing-card {
         width: 100%;
         max-width: 350px;
+    }
+    .modal-content {
+        margin: 30% auto;
     }
 }
 </style>
@@ -221,7 +230,6 @@ body.dark .email-template {
         const modal = document.getElementById('upgradeModal');
         const planName = plan === 'pro' ? 'Pro' : 'Premium';
         document.getElementById('selectedPlan').textContent = planName;
-        document.getElementById('planSubject').textContent = planName;
         document.getElementById('planBody').textContent = planName;
         modal.style.display = 'block';
     }

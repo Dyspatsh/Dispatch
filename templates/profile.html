@@ -13,6 +13,12 @@
             <p><strong>Role:</strong> {{ user.role }}</p>
             <p><strong>Member since:</strong> {{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
             <p><strong>Account age:</strong> {{ ((now - user.created_at).days) }} days</p>
+            {% if user.role in ['pro', 'premium'] and user.subscription_expires_at %}
+                {% set days_left = (user.subscription_expires_at - now).days %}
+                {% if days_left > 0 %}
+                <p><strong>Subscription expires in:</strong> {{ days_left }} days</p>
+                {% endif %}
+            {% endif %}
         </div>
     </div>
     
@@ -84,9 +90,11 @@
     </div>
     
     <div class="settings-section">
-        <h2>Blocked Contacts</h2>
-        <div id="blockedList" class="blocked-list">
-            <p class="empty-message">Loading blocked contacts...</p>
+        <h2>Blocked Users</h2>
+        <div class="blocked-users-scroll">
+            <div id="blockedList" class="blocked-list">
+                <p class="empty-message">Loading blocked users...</p>
+            </div>
         </div>
     </div>
     
@@ -101,6 +109,18 @@
         </div>
     </div>
 </div>
+
+<style>
+.blocked-users-scroll {
+    max-height: 200px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.blocked-users-scroll::-webkit-scrollbar {
+    display: none;
+}
+</style>
 
 <script>
     const themeToggle = document.getElementById('themeToggle');
@@ -130,7 +150,7 @@
                         </div>
                     `).join('');
                 } else {
-                    blockedList.innerHTML = '<p class="empty-message">No blocked contacts</p>';
+                    blockedList.innerHTML = '<p class="empty-message">No blocked users</p>';
                 }
             });
     }

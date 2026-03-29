@@ -1160,3 +1160,185 @@ body.dark .skeleton-text {
 .expiry-timer-warning {
     color: #f39c12;
 }
+
+/* Mobile View Fixes */
+@media (max-width: 768px) {
+    /* Fix tables on mobile */
+    .table-responsive {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .data-table {
+        min-width: 600px;
+    }
+    
+    /* Fix cards on mobile */
+    .user-card, .file-card, .invitation-item, .chat-item {
+        margin: 0.5rem;
+    }
+    
+    /* Fix chat on mobile */
+    .chat-layout {
+        flex-direction: column;
+        height: auto;
+    }
+    
+    .chat-sidebar {
+        width: 100%;
+        max-height: 200px;
+        overflow-y: auto;
+    }
+    
+    .chat-messages {
+        max-height: 400px;
+    }
+    
+    /* Fix forms on mobile */
+    .form-container {
+        margin: 1rem;
+        padding: 1rem;
+    }
+    
+    /* Fix buttons on mobile */
+    .btn {
+        display: block;
+        width: 100%;
+        text-align: center;
+        margin: 0.5rem 0;
+    }
+    
+    .user-actions-compact, .file-actions-compact, .invitation-actions {
+        justify-content: center;
+    }
+    
+    /* Fix modals on mobile */
+    .modal-content {
+        margin: 20% auto;
+        width: 95%;
+    }
+    
+    .modal-large {
+        width: 95%;
+    }
+    
+    /* Fix grids on mobile */
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+    }
+    
+    .features {
+        flex-direction: column;
+    }
+    
+    .feature {
+        width: 100%;
+    }
+    
+    /* Fix navigation on mobile */
+    .nav-container {
+        flex-wrap: nowrap;
+    }
+    
+    .user-info {
+        display: none;
+    }
+    
+    .nav-links-left {
+        display: none;
+    }
+    
+    .burger-menu {
+        display: block;
+    }
+    
+    /* Fix progress bar on mobile */
+    .progress-stats {
+        flex-direction: column;
+        text-align: center;
+        gap: 0.25rem;
+    }
+    
+    /* Fix tabs on mobile */
+    .tabs, .messages-tabs, .history-tabs {
+        flex-wrap: wrap;
+    }
+    
+    .tab-button, .history-tab-btn {
+        flex: 1;
+        text-align: center;
+        padding: 0.5rem;
+        font-size: 0.8rem;
+    }
+}
+
+@media (max-width: 480px) {
+    /* Extra small screens */
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .hero h1 {
+        font-size: 1.5rem;
+    }
+    
+    .hero h2 {
+        font-size: 1rem;
+    }
+    
+    .stat-value {
+        font-size: 1.2rem;
+    }
+    
+    .detail {
+        font-size: 0.6rem;
+    }
+    
+    .user-name {
+        font-size: 0.8rem;
+    }
+    
+    .action-btn {
+        padding: 0.2rem 0.4rem;
+        font-size: 0.6rem;
+    }
+    
+    .modal-header h3 {
+        font-size: 1rem;
+    }
+    
+    .modal-body {
+        padding: 0.75rem;
+    }
+    
+    .options-grid {
+        gap: 0.75rem;
+    }
+    
+    .option-card {
+        padding: 0.75rem;
+    }
+}
+
+/* Hide scrollbars but keep functionality */
+.users-list::-webkit-scrollbar,
+.files-list::-webkit-scrollbar,
+.active-logs-list::-webkit-scrollbar,
+.failed-logins-list::-webkit-scrollbar,
+.chat-messages::-webkit-scrollbar,
+.sidebar-menu::-webkit-scrollbar,
+.blocked-users-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+.users-list,
+.files-list,
+.active-logs-list,
+.failed-logins-list,
+.chat-messages,
+.sidebar-menu,
+.blocked-users-scroll {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
