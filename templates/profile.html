@@ -31,7 +31,7 @@
                 </button>
                 <button class="settings-menu-item" data-section="sessions">
                     <span class="menu-icon">[📋]</span>
-                    <span>Sessions</span>
+                    <span>Sessions & Security</span>
                 </button>
                 <button class="settings-menu-item" data-section="logout">
                     <span class="menu-icon">[→]</span>
@@ -69,6 +69,13 @@
                         <span class="info-value">
                             Expires on {{ user.subscription_expires_at.strftime('%Y-%m-%d') }}
                             <span id="subscriptionCountdown" class="countdown-timer" data-expires="{{ user.subscription_expires_at.isoformat() }}"></span>
+                        </span>
+                    </div>
+                    {% elif user.role in ['pro', 'premium'] %}
+                    <div class="info-row subscription-row">
+                        <span class="info-label">Subscription:</span>
+                        <span class="info-value">
+                            <span class="warning-text">Expired - <a href="/roles/upgrade">Upgrade Now</a></span>
                         </span>
                     </div>
                     {% endif %}
@@ -207,9 +214,20 @@
             </div>
             
             <div id="section-sessions" class="settings-section">
-                <h2>Sessions</h2>
-                <div id="sessionsList" class="sessions-list">
-                    <div class="loading-spinner">Loading...</div>
+                <h2>Sessions & Security</h2>
+                
+                <div class="sessions-subsection">
+                    <h3>Login History</h3>
+                    <div id="sessionsList" class="sessions-list">
+                        <div class="loading-spinner">Loading...</div>
+                    </div>
+                </div>
+                
+                <div class="security-logs-subsection">
+                    <h3>Recent Security Activity</h3>
+                    <div id="securityLogs" class="security-logs-list">
+                        <div class="loading-spinner">Loading security logs...</div>
+                    </div>
                 </div>
             </div>
             
@@ -447,14 +465,35 @@
     margin-left: 0.5rem;
     font-family: monospace;
     font-size: 0.85rem;
-    color: var(--primary);
     font-weight: bold;
+}
+
+.countdown-timer .warning {
+    color: #f39c12;
+}
+
+.countdown-timer .critical {
+    color: #e74c3c;
+}
+
+.countdown-timer .expired {
+    color: #e74c3c;
+}
+
+.countdown-timer .expired a {
+    color: #e74c3c;
+    text-decoration: underline;
+}
+
+.warning-text {
+    color: #e74c3c;
 }
 
 .subscription-row .info-value {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .role-badge {
@@ -466,10 +505,16 @@
     font-size: 0.8rem;
 }
 
-.bio-section, .file-stats-section, .twofa-info, .upgrade-info, .logout-info {
+.bio-section, .file-stats-section, .twofa-info, .upgrade-info, .logout-info, .sessions-subsection, .security-logs-subsection {
     margin-top: 2rem;
     padding-top: 1rem;
     border-top: 1px solid var(--border-light);
+}
+
+.sessions-subsection h3, .security-logs-subsection h3 {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: var(--primary);
 }
 
 .bio-section h3, .file-stats-section h3 {
@@ -612,12 +657,15 @@ input:checked + .theme-slider:before, input:checked + .toggle-slider:before {
     font-weight: bold;
 }
 
-.blocked-users-list, .sessions-list {
-    max-height: 400px;
+.blocked-users-list, .sessions-list, .security-logs-list {
+    max-height: 300px;
     overflow-y: auto;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 0.5rem;
 }
 
-.blocked-user-item, .session-item {
+.blocked-user-item, .session-item, .log-entry {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -625,13 +673,50 @@ input:checked + .theme-slider:before, input:checked + .toggle-slider:before {
     border-bottom: 1px solid var(--border-light);
 }
 
+.blocked-user-item:last-child, .session-item:last-child, .log-entry:last-child {
+    border-bottom: none;
+}
+
 .blocked-username {
     font-weight: 500;
 }
 
-.session-time {
+.session-time, .log-time {
     font-family: monospace;
     font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.log-entry {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+}
+
+.log-action {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.log-details {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.log-success {
+    border-left: 3px solid var(--success);
+}
+
+.log-warning {
+    border-left: 3px solid var(--warning);
+}
+
+.log-danger {
+    border-left: 3px solid var(--danger);
+}
+
+.log-info {
+    border-left: 3px solid var(--primary);
 }
 
 .feature-list {
@@ -795,7 +880,7 @@ function updateSubscriptionCountdown() {
     const diff = expiresAt - now;
     
     if (diff <= 0) {
-        countdownSpan.textContent = '(Expired)';
+        countdownSpan.innerHTML = '<span class="expired">(Expired) <a href="/roles/upgrade">Upgrade</a></span>';
         return;
     }
     
@@ -803,15 +888,22 @@ function updateSubscriptionCountdown() {
     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     
+    let timeText = '';
+    let colorClass = '';
+    
     if (days > 0) {
-        countdownSpan.textContent = `(${days}d ${hours}h left)`;
+        timeText = `${days}d ${hours}h left`;
+        if (days < 3) colorClass = 'critical';
+        else if (days < 7) colorClass = 'warning';
     } else if (hours > 0) {
-        countdownSpan.textContent = `(${hours}h ${minutes}m left)`;
-    } else if (minutes > 0) {
-        countdownSpan.textContent = `(${minutes}m left)`;
+        timeText = `${hours}h ${minutes}m left`;
+        colorClass = 'warning';
     } else {
-        countdownSpan.textContent = '(Less than a minute left)';
+        timeText = `${minutes}m left`;
+        colorClass = 'critical';
     }
+    
+    countdownSpan.innerHTML = `<span class="${colorClass}">(${timeText})</span>`;
 }
 
 // Theme toggle
@@ -842,7 +934,7 @@ if (readReceiptsToggle) {
         formData.append('enabled', enabled);
         formData.append('csrf_token', getCsrfToken());
         
-        fetch('/profile/read-receipts', {
+        fetch('/chat/settings/read_receipts', {
             method: 'POST',
             body: formData
         }).then(res => res.json()).then(data => {
@@ -889,6 +981,7 @@ function showSection(sectionId) {
         loadBlockedUsers();
     } else if (sectionId === 'sessions') {
         loadSessions();
+        loadSecurityLogs();
     } else if (sectionId === 'myaccount') {
         loadFileStats();
     }
@@ -980,6 +1073,32 @@ function loadSessions() {
                 `).join('');
             } else {
                 container.innerHTML = '<div class="empty-state">No login history found</div>';
+            }
+        });
+}
+
+function loadSecurityLogs() {
+    fetch('/api/security-logs')
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById('securityLogs');
+            if (data.success && data.logs && data.logs.length > 0) {
+                container.innerHTML = data.logs.map(log => {
+                    let logClass = 'log-info';
+                    if (log.action_type === 'login_success') logClass = 'log-success';
+                    else if (log.action_type === 'login_failed' || log.action_type === 'login_blocked') logClass = 'log-warning';
+                    else if (log.action_type === 'account_banned' || log.action_type === 'account_deleted') logClass = 'log-danger';
+                    
+                    return `
+                        <div class="log-entry ${logClass}">
+                            <span class="log-time">${new Date(log.created_at).toLocaleString()}</span>
+                            <span class="log-action">${escapeHtml(log.action)}</span>
+                            ${log.details ? `<span class="log-details">${escapeHtml(log.details)}</span>` : ''}
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                container.innerHTML = '<div class="empty-state">No security events in the last 30 days</div>';
             }
         });
 }
@@ -1192,7 +1311,6 @@ document.getElementById('cancelLogoutBtn')?.addEventListener('click', () => {
     showSection('myaccount');
 });
 
-// Disable 2FA button
 document.getElementById('disable2faBtn')?.addEventListener('click', () => {
     if (confirm('Disable Two-Factor Authentication? This will make your account less secure.')) {
         const formData = new FormData();

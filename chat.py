@@ -8,9 +8,13 @@ import json
 import secrets
 import asyncio
 import os
+import logging
+import re
 
-from database import get_db, User, ChatConversation, ChatMessage, BlockedUser, Session as DBSession, ChatGroup, GroupMember, GroupChatMessage, MessageReaction, MessageReadReceipt, GroupInvitation
+from database import get_db, User, ChatConversation, ChatMessage, BlockedUser, Session as DBSession, ChatGroup, GroupMember, GroupChatMessage, MessageReaction, MessageReadReceipt, GroupInvitation, SecurityLog
 from roles import check_chat_access, get_chat_char_limit
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 templates = Jinja2Templates(directory="templates")
@@ -22,6 +26,27 @@ def escape_html(text: str) -> str:
     if not text:
         return ""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+
+def log_security_event(db: Session, user_id: int, action: str, action_type: str, details: str = None, request: Request = None):
+    ip_address = None
+    user_agent = None
+    if request:
+        if "x-forwarded-for" in request.headers:
+            ip_address = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        else:
+            ip_address = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+    
+    log = SecurityLog(
+        user_id=user_id,
+        action=action,
+        action_type=action_type,
+        details=details,
+        ip_address=ip_address,
+        user_agent=user_agent
+    )
+    db.add(log)
+    db.commit()
 
 def get_current_user(db: Session, session_token: str = None):
     if not session_token:
@@ -61,6 +86,15 @@ def reset_unread_count(user_id: int, conversation_id: int):
 
 def can_create_group(user) -> bool:
     return user.role in ['premium', 'owner']
+
+def validate_group_name(name: str) -> tuple:
+    if len(name) < 3:
+        return False, "Group name must be at least 3 characters"
+    if len(name) > 50:
+        return False, "Group name cannot exceed 50 characters"
+    if not re.match(r'^[a-zA-Z0-9_\-\s]+$', name):
+        return False, "Group name can only contain letters, numbers, spaces, underscores, and hyphens"
+    return True, ""
 
 class ConnectionManager:
     def __init__(self):
@@ -128,33 +162,25 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# ============================================
-# READ RECEIPTS SETTINGS
-# ============================================
-
 @router.post("/settings/read_receipts")
 async def update_read_receipts_setting(
+    request: Request,
     enabled: bool = Form(...),
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
 ):
-    """Update read receipts setting for the user (affects both private and group chats)"""
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
     
-    # Check if user is Premium (only Premium users can disable read receipts)
     if not enabled and user.role not in ["premium", "owner"]:
         return {"success": False, "error": "Read receipts can only be disabled by Premium users"}
     
     user.read_receipts_enabled = enabled
     db.commit()
+    log_security_event(db, user.id, f"Read receipts {'disabled' if not enabled else 'enabled'}", "read_receipts", None, request)
     
     return {"success": True, "message": f"Read receipts {'enabled' if enabled else 'disabled'}"}
-
-# ============================================
-# STATIC ROUTES (No parameters - must come FIRST)
-# ============================================
 
 @router.get("/")
 async def messages_page(request: Request, session_token: str = Cookie(None), db: Session = Depends(get_db)):
@@ -168,13 +194,11 @@ async def messages_page(request: Request, session_token: str = Cookie(None), db:
     sent_invitations = db.query(ChatConversation).filter(((ChatConversation.user1_id == user.id) | (ChatConversation.user2_id == user.id)), ChatConversation.status == "pending", ChatConversation.initiator_id == user.id).all()
     active_conversations = db.query(ChatConversation).filter(((ChatConversation.user1_id == user.id) | (ChatConversation.user2_id == user.id)), ChatConversation.status == "active").order_by(ChatConversation.updated_at.desc()).all()
     
-    # Get pending group invitations
     pending_group_invites = db.query(GroupInvitation).filter(
         GroupInvitation.invited_user_id == user.id,
         GroupInvitation.status == "pending"
     ).all()
     
-    # Get sent group invitations
     sent_group_invites = db.query(GroupInvitation).filter(
         GroupInvitation.inviter_id == user.id,
         GroupInvitation.status == "pending"
@@ -196,10 +220,6 @@ async def messages_page(request: Request, session_token: str = Cookie(None), db:
         "sent_group_invites": sent_group_invites
     })
 
-# ============================================
-# GROUP ROUTES (Static group routes - must come BEFORE parameter routes)
-# ============================================
-
 @router.get("/groups")
 async def groups_page(request: Request, session_token: str = Cookie(None), db: Session = Depends(get_db)):
     user = get_current_user(db, session_token)
@@ -217,6 +237,7 @@ async def groups_page(request: Request, session_token: str = Cookie(None), db: S
 
 @router.post("/group/update_bio/{group_id}")
 async def update_group_bio(
+    request: Request,
     group_id: int,
     description: str = Form(""),
     session_token: str = Cookie(None),
@@ -236,6 +257,7 @@ async def update_group_bio(
     
     group.description = escape_html(description) if description else None
     db.commit()
+    log_security_event(db, user.id, f"Group description updated: {group.name}", "group_update", None, request)
     
     return {"success": True, "message": "Description updated"}
 
@@ -295,6 +317,7 @@ async def get_group_data(group_id: int, session_token: str = Cookie(None), db: S
 
 @router.post("/group/create")
 async def create_group(
+    request: Request,
     name: str = Form(...),
     description: str = Form(None),
     session_token: str = Cookie(None),
@@ -311,8 +334,9 @@ async def create_group(
     if description:
         description = escape_html(description)
     
-    if len(name) < 3:
-        return {"success": False, "error": "Group name must be at least 3 characters"}
+    valid, error = validate_group_name(name)
+    if not valid:
+        return {"success": False, "error": error}
     
     new_group = ChatGroup(
         name=name,
@@ -331,10 +355,13 @@ async def create_group(
     db.add(member)
     db.commit()
     
+    log_security_event(db, user.id, f"Group created: {name}", "group_create", None, request)
+    
     return {"success": True, "group_id": new_group.id, "name": new_group.name}
 
 @router.post("/group/invite/{group_id}")
 async def invite_to_group(
+    request: Request,
     group_id: int,
     username: str = Form(...),
     session_token: str = Cookie(None),
@@ -378,10 +405,13 @@ async def invite_to_group(
     db.add(new_invite)
     db.commit()
     
+    log_security_event(db, user.id, f"Invited {target_user.username} to group {group.name}", "group_invite", None, request)
+    
     return {"success": True, "message": f"Invitation sent to {target_user.username}"}
 
 @router.post("/group/invite/accept/{invitation_id}")
 async def accept_group_invitation(
+    request: Request,
     invitation_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -404,10 +434,13 @@ async def accept_group_invitation(
     invitation.status = "accepted"
     db.commit()
     
+    log_security_event(db, user.id, f"Accepted invitation to group {invitation.group.name}", "group_join", None, request)
+    
     return {"success": True, "group_id": invitation.group_id}
 
 @router.post("/group/invite/decline/{invitation_id}")
 async def decline_group_invitation(
+    request: Request,
     invitation_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -423,10 +456,13 @@ async def decline_group_invitation(
     invitation.status = "declined"
     db.commit()
     
+    log_security_event(db, user.id, f"Declined invitation to group {invitation.group.name}", "group_decline", None, request)
+    
     return {"success": True}
 
 @router.post("/group/invite/cancel/{invitation_id}")
 async def cancel_group_invitation(
+    request: Request,
     invitation_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -442,10 +478,13 @@ async def cancel_group_invitation(
     db.delete(invitation)
     db.commit()
     
+    log_security_event(db, user.id, f"Cancelled invitation to group {invitation.group.name}", "group_cancel_invite", None, request)
+    
     return {"success": True}
 
 @router.post("/group/send/{group_id}")
 async def send_group_message(
+    request: Request,
     group_id: int,
     content: str = Form(...),
     session_token: str = Cookie(None),
@@ -494,6 +533,7 @@ async def send_group_message(
 
 @router.post("/group/mark_read/{message_id}")
 async def mark_group_message_read(
+    request: Request,
     message_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -502,7 +542,6 @@ async def mark_group_message_read(
     if not user:
         return {"success": False, "error": "Not authenticated"}
     
-    # Only mark as read if the user has read receipts enabled
     if not user.read_receipts_enabled:
         return {"success": True}
     
@@ -604,6 +643,7 @@ async def add_group_reaction(
 
 @router.post("/group/remove_member/{group_id}")
 async def remove_group_member(
+    request: Request,
     group_id: int,
     user_id: int = Form(...),
     session_token: str = Cookie(None),
@@ -634,10 +674,13 @@ async def remove_group_member(
     db.delete(target_membership)
     db.commit()
     
+    log_security_event(db, admin.id, f"Removed user {user_id} from group {group.name}", "group_remove_member", None, request)
+    
     return {"success": True, "message": "User removed from group"}
 
 @router.post("/group/promote_member/{group_id}")
 async def promote_group_member(
+    request: Request,
     group_id: int,
     user_id: int = Form(...),
     session_token: str = Cookie(None),
@@ -668,10 +711,13 @@ async def promote_group_member(
     target_membership.role = "admin"
     db.commit()
     
+    log_security_event(db, admin.id, f"Promoted user {user_id} to admin in group {group.name}", "group_promote", None, request)
+    
     return {"success": True, "message": "User promoted to admin"}
 
 @router.post("/group/leave/{group_id}")
 async def leave_group(
+    request: Request,
     group_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -694,6 +740,7 @@ async def leave_group(
             oldest_admin.role = "owner"
             db.delete(membership)
             db.commit()
+            log_security_event(db, user.id, f"Left group {group_id}, ownership transferred", "group_leave", None, request)
             return {"success": True, "message": "You left the group. Ownership transferred to another admin."}
         else:
             db.delete(membership)
@@ -701,14 +748,17 @@ async def leave_group(
             if group:
                 db.delete(group)
             db.commit()
+            log_security_event(db, user.id, f"Left and deleted group {group_id} (last member)", "group_delete", None, request)
             return {"success": True, "message": "You left the group. Group was deleted as you were the only member."}
     else:
         db.delete(membership)
         db.commit()
+        log_security_event(db, user.id, f"Left group {group_id}", "group_leave", None, request)
         return {"success": True, "message": "You left the group"}
 
 @router.post("/group/delete/{group_id}")
 async def delete_group(
+    request: Request,
     group_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -723,14 +773,12 @@ async def delete_group(
     
     group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
     if group:
+        group_name = group.name
         db.delete(group)
         db.commit()
+        log_security_event(db, user.id, f"Deleted group {group_name}", "group_delete", None, request)
     
     return {"success": True, "message": "Group deleted"}
-
-# ============================================
-# PRIVATE CHAT ROUTES (Parameter routes - must come AFTER static/group routes)
-# ============================================
 
 @router.get("/{other_user_id}")
 async def chat_page(request: Request, other_user_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
@@ -777,7 +825,13 @@ async def chat_page(request: Request, other_user_id: int, session_token: str = C
     })
 
 @router.post("/send")
-async def send_message(recipient_id: int = Form(...), content: str = Form(...), session_token: str = Cookie(None), db: Session = Depends(get_db)):
+async def send_message(
+    request: Request,
+    recipient_id: int = Form(...),
+    content: str = Form(...),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
@@ -826,12 +880,16 @@ async def send_message(recipient_id: int = Form(...), content: str = Form(...), 
     return {"success": True, "message": {"id": new_message.id, "content": content, "created_at": new_message.created_at.isoformat(), "expires_at": expires_at.isoformat()}}
 
 @router.post("/mark_read/{message_id}")
-async def mark_message_read(message_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+async def mark_message_read(
+    request: Request,
+    message_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
     
-    # Only mark as read if the user has read receipts enabled
     if not user.read_receipts_enabled:
         return {"success": True}
     
@@ -854,12 +912,9 @@ async def mark_message_read(message_id: int, session_token: str = Cookie(None), 
     
     return {"success": True}
 
-# ============================================
-# PRIVATE CHAT INVITATION ROUTES
-# ============================================
-
 @router.post("/invite")
 async def send_invitation(
+    request: Request,
     username: str = Form(...),
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -899,10 +954,13 @@ async def send_invitation(
     db.add(new_conv)
     db.commit()
     
+    log_security_event(db, user.id, f"Sent chat invitation to {recipient.username}", "chat_invite", None, request)
+    
     return {"success": True, "message": f"Invitation sent to {recipient.username}"}
 
 @router.post("/invite/accept/{conversation_id}")
 async def accept_invitation(
+    request: Request,
     conversation_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -926,10 +984,14 @@ async def accept_invitation(
     db.commit()
     
     other_user_id = conv.user1_id if conv.user2_id == user.id else conv.user2_id
+    
+    log_security_event(db, user.id, f"Accepted chat invitation from user {other_user_id}", "chat_accept", None, request)
+    
     return RedirectResponse(url=f"/chat/{other_user_id}", status_code=303)
 
 @router.post("/invite/decline/{conversation_id}")
 async def decline_invitation(
+    request: Request,
     conversation_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -948,10 +1010,13 @@ async def decline_invitation(
     db.delete(conv)
     db.commit()
     
+    log_security_event(db, user.id, "Declined chat invitation", "chat_decline", None, request)
+    
     return RedirectResponse(url="/chat", status_code=303)
 
 @router.post("/invite/cancel/{conversation_id}")
 async def cancel_invitation(
+    request: Request,
     conversation_id: int,
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -973,14 +1038,17 @@ async def cancel_invitation(
     db.delete(conv)
     db.commit()
     
+    log_security_event(db, user.id, "Cancelled chat invitation", "chat_cancel", None, request)
+    
     return RedirectResponse(url="/chat", status_code=303)
 
-# ============================================
-# BLOCK USER ENDPOINTS
-# ============================================
-
 @router.post("/block/{user_id}")
-async def block_user(user_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+async def block_user(
+    request: Request,
+    user_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
@@ -995,10 +1063,16 @@ async def block_user(user_id: int, session_token: str = Cookie(None), db: Sessio
         new_block = BlockedUser(user_id=user.id, blocked_user_id=user_id)
         db.add(new_block)
         db.commit()
+        log_security_event(db, user.id, f"Blocked user {target.username}", "user_block", None, request)
     return {"success": True, "message": "User blocked"}
 
 @router.post("/unblock/{user_id}")
-async def unblock_user(user_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+async def unblock_user(
+    request: Request,
+    user_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
@@ -1006,6 +1080,7 @@ async def unblock_user(user_id: int, session_token: str = Cookie(None), db: Sess
     if block:
         db.delete(block)
         db.commit()
+        log_security_event(db, user.id, f"Unblocked user {user_id}", "user_unblock", None, request)
     return {"success": True, "message": "User unblocked"}
 
 @router.get("/blocked/list")
@@ -1021,9 +1096,40 @@ async def get_blocked_list(session_token: str = Cookie(None), db: Session = Depe
             blocked_users.append({"id": blocked_user.id, "username": blocked_user.username})
     return {"success": True, "blocked_users": blocked_users}
 
-# ============================================
-# WEBSOCKET ENDPOINTS
-# ============================================
+@router.get("/search/global")
+async def search_global_messages(q: str, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    conversations = db.query(ChatConversation).filter(
+        ((ChatConversation.user1_id == user.id) | (ChatConversation.user2_id == user.id)),
+        ChatConversation.status == "active"
+    ).all()
+    
+    conversation_ids = [conv.id for conv in conversations]
+    
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.conversation_id.in_(conversation_ids),
+        ChatMessage.encrypted_content.contains(q.lower())
+    ).order_by(ChatMessage.created_at.desc()).limit(50).all()
+    
+    results = []
+    for msg in messages:
+        conv = db.query(ChatConversation).filter(ChatConversation.id == msg.conversation_id).first()
+        other_user_id = conv.user1_id if conv.user2_id == user.id else conv.user2_id
+        other_user = db.query(User).filter(User.id == other_user_id).first()
+        
+        results.append({
+            "id": msg.id,
+            "content": msg.encrypted_content,
+            "sender": msg.sender.username,
+            "created_at": msg.created_at.isoformat(),
+            "other_user_id": other_user_id,
+            "other_user": other_user.username if other_user else "Unknown"
+        })
+    
+    return {"success": True, "results": results}
 
 @router.websocket("/ws/{conversation_id}")
 async def websocket_endpoint(websocket: WebSocket, conversation_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):

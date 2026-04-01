@@ -158,6 +158,25 @@
     </div>
 </div>
 
+<!-- User Details Modal -->
+<div id="userDetailsModal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3 id="modalTitle">User Details</h3>
+            <button class="modal-close" onclick="closeUserDetailsModal()">[X]</button>
+        </div>
+        <div class="modal-body" id="userDetailsBody">
+            <div class="loading-spinner">Loading...</div>
+        </div>
+        <div class="modal-footer">
+            <button id="modalBanBtn" class="btn-danger">Ban User</button>
+            <button id="modalRoleBtn" class="btn-primary">Change Role</button>
+            <button id="modalDeleteBtn" class="btn-danger">Delete User</button>
+            <button class="btn-secondary" onclick="closeUserDetailsModal()">Close</button>
+        </div>
+    </div>
+</div>
+
 <!-- Batch Role Modal -->
 <div id="batchRoleModal" class="modal" style="display: none;">
     <div class="modal-content">
@@ -504,8 +523,12 @@
     margin: 10% auto;
     border-radius: var(--radius-lg);
     width: 90%;
-    max-width: 450px;
+    max-width: 550px;
     border: 1px solid var(--border-light);
+}
+
+.modal-large {
+    max-width: 550px;
 }
 
 .modal-header {
@@ -531,6 +554,8 @@
 
 .modal-body {
     padding: 1.25rem;
+    max-height: 60vh;
+    overflow-y: auto;
 }
 
 .modal-footer {
@@ -539,6 +564,55 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.75rem;
+}
+
+.user-details .info-row {
+    display: flex;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.user-details .info-label {
+    width: 140px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.user-details .info-value {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.user-details .divider {
+    margin: 0.5rem 0;
+    border-top: 1px solid var(--border-light);
+}
+
+.user-details .role-badge {
+    display: inline-block;
+    background: var(--gradient-primary);
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-sm);
+    color: white;
+    font-size: 0.8rem;
+}
+
+.user-details .banned {
+    color: var(--danger);
+    font-weight: bold;
+}
+
+.user-details .active {
+    color: var(--success);
+    font-weight: bold;
+}
+
+.user-details .warning {
+    color: var(--warning);
+}
+
+.user-details .critical {
+    color: var(--danger);
 }
 
 @media (max-width: 1024px) {
@@ -584,6 +658,15 @@
     .data-table td {
         padding: 0.5rem;
     }
+    
+    .user-details .info-row {
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    
+    .user-details .info-label {
+        width: auto;
+    }
 }
 </style>
 
@@ -602,6 +685,137 @@ let currentActivityType = 'uploads';
 
 function getCsrfToken() {
     return document.querySelector('input[name="csrf_token"]')?.value || '{{ csrf_token }}';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// User Details Modal
+function showUserDetailsModal(userId) {
+    const modal = document.getElementById('userDetailsModal');
+    const modalBody = document.getElementById('userDetailsBody');
+    modalBody.innerHTML = '<div class="loading-spinner">Loading user details...</div>';
+    modal.style.display = 'block';
+    
+    fetch(`/admin/user/${userId}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                let subHtml = '';
+                if (data.user.subscription_expires_at) {
+                    const expiryDate = new Date(data.user.subscription_expires_at);
+                    const daysLeft = Math.ceil((expiryDate - new Date()) / (1000 * 60 * 60 * 24));
+                    let daysClass = '';
+                    if (daysLeft < 3) daysClass = 'critical';
+                    else if (daysLeft < 7) daysClass = 'warning';
+                    
+                    subHtml = `
+                        <div class="info-row">
+                            <span class="info-label">Subscription:</span>
+                            <span class="info-value">
+                                Expires on ${expiryDate.toLocaleDateString()}
+                                <span class="${daysClass}" style="margin-left: 0.5rem;">(${daysLeft} days left)</span>
+                            </span>
+                        </div>
+                    `;
+                } else if (data.user.role === 'user') {
+                    subHtml = `
+                        <div class="info-row">
+                            <span class="info-label">Subscription:</span>
+                            <span class="info-value">Free User</span>
+                        </div>
+                    `;
+                } else {
+                    subHtml = `
+                        <div class="info-row">
+                            <span class="info-label">Subscription:</span>
+                            <span class="info-value warning-text">Expired</span>
+                        </div>
+                    `;
+                }
+                
+                modalBody.innerHTML = `
+                    <div class="user-details">
+                        <div class="info-row">
+                            <span class="info-label">Username:</span>
+                            <span class="info-value">${escapeHtml(data.user.username)}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Role:</span>
+                            <span class="info-value role-badge">${data.user.role}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Status:</span>
+                            <span class="info-value ${data.user.is_banned ? 'banned' : 'active'}">
+                                ${data.user.is_banned ? 'Banned' : 'Active'}
+                            </span>
+                        </div>
+                        ${subHtml}
+                        <div class="info-row">
+                            <span class="info-label">2FA:</span>
+                            <span class="info-value">${data.user.twofa_enabled ? 'Enabled' : 'Disabled'}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Member since:</span>
+                            <span class="info-value">${new Date(data.user.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Last login:</span>
+                            <span class="info-value">${data.user.last_login ? new Date(data.user.last_login).toLocaleString() : 'Never'}</span>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="info-row">
+                            <span class="info-label">Files sent:</span>
+                            <span class="info-value">${data.file_stats.files_sent}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Files received:</span>
+                            <span class="info-value">${data.file_stats.files_received}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Storage sent:</span>
+                            <span class="info-value">${data.file_stats.storage_sent_gb} GB</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Storage received:</span>
+                            <span class="info-value">${data.file_stats.storage_received_gb} GB</span>
+                        </div>
+                        <div class="divider"></div>
+                        <div class="info-row">
+                            <span class="info-label">Active chats:</span>
+                            <span class="info-value">${data.chat_stats.active_chats}</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Messages sent:</span>
+                            <span class="info-value">${data.chat_stats.messages_sent}</span>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('modalBanBtn').onclick = () => {
+                    closeUserDetailsModal();
+                    showBanModal(userId, data.user.username);
+                };
+                document.getElementById('modalRoleBtn').onclick = () => {
+                    closeUserDetailsModal();
+                    showRoleModal(userId, data.user.username, data.user.role);
+                };
+                document.getElementById('modalDeleteBtn').onclick = () => {
+                    closeUserDetailsModal();
+                    deleteUser(userId, data.user.username);
+                };
+            } else {
+                modalBody.innerHTML = '<div class="error-message">Failed to load user details</div>';
+            }
+        });
+}
+
+function closeUserDetailsModal() {
+    document.getElementById('userDetailsModal').style.display = 'none';
 }
 
 // Initialize Charts
@@ -770,7 +984,6 @@ function updateGauge(chart, value) {
     }
 }
 
-// Load Stats
 function loadStats() {
     fetch('/admin/stats')
         .then(res => res.json())
@@ -792,7 +1005,6 @@ function loadStats() {
         });
 }
 
-// Load User Growth Chart
 function loadUserGrowth(period) {
     fetch(`/admin/chart/user-growth?days=${period}`)
         .then(res => res.json())
@@ -805,7 +1017,6 @@ function loadUserGrowth(period) {
         });
 }
 
-// Load File Activity Chart
 function loadFileActivity(period, type) {
     fetch(`/admin/chart/file-activity?days=${period}&type=${type}`)
         .then(res => res.json())
@@ -819,7 +1030,6 @@ function loadFileActivity(period, type) {
         });
 }
 
-// Load Storage by Role
 function loadStorageByRole() {
     fetch('/admin/chart/storage-by-role')
         .then(res => res.json())
@@ -831,7 +1041,6 @@ function loadStorageByRole() {
         });
 }
 
-// Load Storage Trend
 function loadStorageTrend() {
     fetch('/admin/chart/storage-trend?days=30')
         .then(res => res.json())
@@ -851,7 +1060,6 @@ function loadStorageTrend() {
         });
 }
 
-// Load Activity Heatmap
 function loadActivityHeatmap() {
     fetch('/admin/chart/activity-heatmap?days=30')
         .then(res => res.json())
@@ -916,7 +1124,6 @@ function renderHeatmap(activities) {
     document.head.appendChild(style);
 }
 
-// Load Users Table
 function loadUsers() {
     const query = document.getElementById('searchUser').value;
     const role = document.getElementById('roleFilter').value;
@@ -958,7 +1165,7 @@ function loadUsers() {
 
 function attachUserEventListeners() {
     document.querySelectorAll('.view-user').forEach(btn => {
-        btn.addEventListener('click', () => showUserDetails(btn.dataset.userId));
+        btn.addEventListener('click', () => showUserDetailsModal(btn.dataset.userId));
     });
     document.querySelectorAll('.ban-user').forEach(btn => {
         btn.addEventListener('click', () => showBanModal(btn.dataset.userId, btn.dataset.username));
@@ -999,11 +1206,6 @@ document.getElementById('selectAllUsers').addEventListener('change', (e) => {
 
 // Batch Actions
 document.getElementById('batchBanBtn').addEventListener('click', () => {
-    const userList = Array.from(selectedUsers).map(id => {
-        const row = document.querySelector(`tr[data-user-id="${id}"]`);
-        const username = row?.querySelector('td:nth-child(3)')?.textContent || '';
-        return { id, username };
-    });
     document.getElementById('batchBanCount').textContent = `${selectedUsers.size} users selected`;
     document.getElementById('batchBanModal').style.display = 'block';
 });
@@ -1099,7 +1301,7 @@ document.getElementById('batchDeleteBtn').addEventListener('click', () => {
                 method: 'POST',
                 body: formData
             });
-        })).then(() => {
+        })).then(responses => {
             if (window.toast) window.toast.success(`Deleted ${userIds.length} users`);
             loadUsers();
             loadStats();
@@ -1110,7 +1312,6 @@ document.getElementById('batchDeleteBtn').addEventListener('click', () => {
     }
 });
 
-// Modals
 function closeBatchRoleModal() {
     document.getElementById('batchRoleModal').style.display = 'none';
 }
@@ -1118,10 +1319,6 @@ function closeBatchRoleModal() {
 function closeBatchBanModal() {
     document.getElementById('batchBanModal').style.display = 'none';
     document.getElementById('batchBanReason').value = '';
-}
-
-function showUserDetails(userId) {
-    window.location.href = `/admin/user/${userId}`;
 }
 
 function showBanModal(userId, username) {
@@ -1185,19 +1382,24 @@ function deleteUser(userId, username) {
         fetch(`/admin/user/delete/${userId}`, { 
             method: 'POST',
             body: formData
-        }).then(() => {
-            if (window.toast) window.toast.success(`User ${username} and all associated data deleted`);
-            loadUsers();
-            loadStats();
+        }).then(data => data.json()).then(data => {
+            if (data.success) {
+                if (window.toast) window.toast.success(`User ${username} and all associated data deleted`);
+                loadUsers();
+                loadStats();
+                if (data.redirect === '/home') {
+                    // If current user is viewing this page, they'll see the refresh
+                    setTimeout(() => {
+                        if (confirm('User deleted. This page will refresh.')) {
+                            window.location.reload();
+                        }
+                    }, 500);
+                }
+            } else {
+                if (window.toast) window.toast.error(data.error || 'Failed to delete user');
+            }
         });
     }
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 function updateBatchButtons() {

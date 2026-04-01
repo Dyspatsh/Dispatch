@@ -6,8 +6,11 @@ from datetime import datetime, timedelta
 import secrets
 import json
 import os
+import logging
 
 from database import get_db, User, Payment
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/roles", tags=["roles"])
 templates = Jinja2Templates(directory="templates")
@@ -29,7 +32,6 @@ def get_current_user(db: Session, session_token: str = None):
     if user and user.totp_enabled and not db_session.twofa_verified:
         return None
     
-    # Check subscription expiry
     if user and user.subscription_expires_at and user.subscription_expires_at < datetime.utcnow():
         user.role = "user"
         user.subscription_expires_at = None
@@ -119,6 +121,7 @@ async def upgrade_page(request: Request, session_token: str = Cookie(None), db: 
 
 @router.post("/upgrade/request")
 async def upgrade_request(
+    request: Request,
     plan: str = Form(...),
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -133,7 +136,9 @@ async def upgrade_request(
     if plan not in ["pro", "premium"]:
         return {"success": False, "error": "Invalid plan"}
     
+    logger.info(f"User {user.username} requested upgrade to {plan}")
+    
     return {
-        "success": True, 
+        "success": True,
         "message": f"To upgrade to {plan}, please email dispatsh@proton.me with your username: {user.username}"
     }
