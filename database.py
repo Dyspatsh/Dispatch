@@ -30,6 +30,8 @@ class User(Base):
     subscription_expires_at = Column(DateTime, nullable=True)
     failed_login_attempts = Column(Integer, default=0)
     last_failed_login = Column(DateTime, nullable=True)
+    read_receipts_enabled = Column(Boolean, default=True)
+    bio = Column(Text, nullable=True)
     
     # 2FA Fields
     totp_secret = Column(String(100), nullable=True)
@@ -46,6 +48,17 @@ class User(Base):
     blocked_users = relationship("BlockedUser", foreign_keys="BlockedUser.user_id", back_populates="user")
     blocked_by = relationship("BlockedUser", foreign_keys="BlockedUser.blocked_user_id", back_populates="blocked_user")
     payments = relationship("Payment", back_populates="user")
+    login_history = relationship("LoginHistory", back_populates="user", cascade="all, delete-orphan")
+    
+    # Phase 2 Group Chat Relationships
+    groups = relationship("GroupMember", back_populates="user")
+    group_messages = relationship("GroupChatMessage", foreign_keys="GroupChatMessage.sender_id")
+    message_reactions = relationship("MessageReaction", back_populates="user")
+    read_receipts = relationship("MessageReadReceipt", back_populates="user")
+    
+    # Group Invitation Relationships
+    sent_group_invitations = relationship("GroupInvitation", foreign_keys="GroupInvitation.inviter_id", back_populates="inviter")
+    received_group_invitations = relationship("GroupInvitation", foreign_keys="GroupInvitation.invited_user_id", back_populates="invited_user")
 
 class File(Base):
     __tablename__ = "files"
@@ -62,7 +75,6 @@ class File(Base):
     expires_at = Column(DateTime, nullable=False)
     accepted_at = Column(DateTime, nullable=True)
     downloaded_at = Column(DateTime, nullable=True)
-    stealth_mode = Column(Boolean, default=False)
     
     # Relationships
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_files")
@@ -167,6 +179,105 @@ class BlockedUser(Base):
     # Relationships
     user = relationship("User", foreign_keys=[user_id], back_populates="blocked_users")
     blocked_user = relationship("User", foreign_keys=[blocked_user_id], back_populates="blocked_by")
+
+# Phase 2: Group Chat Tables
+class ChatGroup(Base):
+    __tablename__ = "chat_groups"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, nullable=True)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    members = relationship("GroupMember", back_populates="group", cascade="all, delete-orphan")
+    messages = relationship("GroupChatMessage", back_populates="group", cascade="all, delete-orphan")
+    invitations = relationship("GroupInvitation", back_populates="group", cascade="all, delete-orphan")
+
+class GroupMember(Base):
+    __tablename__ = "group_members"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("chat_groups.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    role = Column(String(20), default="member")
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    last_read_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    group = relationship("ChatGroup", back_populates="members")
+    user = relationship("User", back_populates="groups")
+
+class GroupChatMessage(Base):
+    __tablename__ = "group_chat_messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("chat_groups.id"), nullable=False)
+    sender_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    encrypted_content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    delivered_at = Column(DateTime, nullable=True)
+    read_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=False)
+    
+    # Relationships
+    group = relationship("ChatGroup", back_populates="messages")
+    sender = relationship("User", foreign_keys=[sender_id], back_populates="group_messages")
+    reactions = relationship("MessageReaction", back_populates="message", cascade="all, delete-orphan")
+    read_receipts = relationship("MessageReadReceipt", back_populates="message", cascade="all, delete-orphan")
+
+class MessageReaction(Base):
+    __tablename__ = "message_reactions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("group_chat_messages.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reaction_type = Column(String(20), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    message = relationship("GroupChatMessage", back_populates="reactions")
+    user = relationship("User", back_populates="message_reactions")
+
+class MessageReadReceipt(Base):
+    __tablename__ = "message_read_receipts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    message_id = Column(Integer, ForeignKey("group_chat_messages.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    read_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    message = relationship("GroupChatMessage", back_populates="read_receipts")
+    user = relationship("User", back_populates="read_receipts")
+
+class GroupInvitation(Base):
+    __tablename__ = "group_invitations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("chat_groups.id"), nullable=False)
+    inviter_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    invited_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    status = Column(String(20), default="pending")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    group = relationship("ChatGroup", back_populates="invitations")
+    inviter = relationship("User", foreign_keys=[inviter_id], back_populates="sent_group_invitations")
+    invited_user = relationship("User", foreign_keys=[invited_user_id], back_populates="received_group_invitations")
+
+class LoginHistory(Base):
+    __tablename__ = "login_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    login_time = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    user = relationship("User", back_populates="login_history")
 
 def init_db():
     Base.metadata.create_all(bind=engine)

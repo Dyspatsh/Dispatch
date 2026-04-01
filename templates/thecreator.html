@@ -1,0 +1,536 @@
+{% extends "base.html" %}
+
+{% block title %}The Creator{% endblock %}
+
+{% block content %}
+<div class="creator-page">
+    <div class="creator-header">
+        <h1>The Creator</h1>
+        <p class="creator-tagline">Building privacy tools for the Tor network</p>
+    </div>
+    
+    <div class="creator-content">
+        <div class="creator-card">
+            <h2>About Me</h2>
+            <div class="creator-info">
+                <div class="info-item">
+                    <span class="info-label">Name:</span>
+                    <span class="info-value">Elio</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Role:</span>
+                    <span class="info-value">Founder & Developer</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Location:</span>
+                    <span class="info-value">Lebanon</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Background:</span>
+                    <span class="info-value">Developer & Security Researcher</span>
+                </div>
+            </div>
+            
+            <div class="bio-section">
+                <h3>Why I Built Dispatch</h3>
+                <p>I created Dispatch because I believe privacy is not a luxury—it's a right. While big tech companies profit from your data, I built a platform where your files and messages belong to you. No tracking. No logs. No compromises.</p>
+                <p>Dispatch is hosted on my own server, running entirely on the Tor network. Every file is encrypted before it leaves your browser, and every message is secured with end-to-end encryption. I built this because I wanted a truly private way to share files and communicate, and I'm sharing it with you.</p>
+            </div>
+            
+            <div class="bio-section">
+                <h3>My Mission</h3>
+                <p>To provide a secure, anonymous, and truly private platform for file sharing and communication—free from surveillance, tracking, and data collection. Privacy should be the default, not an afterthought.</p>
+            </div>
+        </div>
+        
+        <div class="creator-card">
+            <h2>Where Your Money Goes</h2>
+            <p>When you upgrade to Pro or Premium, your contribution goes directly toward:</p>
+            <div class="funding-breakdown">
+                <div class="funding-item">
+                    <div class="funding-label">Server & Infrastructure</div>
+                    <div class="funding-bar"><div class="funding-fill" style="width: 45%;"></div></div>
+                    <div class="funding-percent">45%</div>
+                    <div class="funding-desc">Server hosting, bandwidth, and maintenance</div>
+                </div>
+                <div class="funding-item">
+                    <div class="funding-label">Development & Improvement</div>
+                    <div class="funding-bar"><div class="funding-fill" style="width: 40%;"></div></div>
+                    <div class="funding-percent">40%</div>
+                    <div class="funding-desc">Time spent coding, adding features, fixing bugs</div>
+                </div>
+                <div class="funding-item">
+                    <div class="funding-label">Continuous Learning</div>
+                    <div class="funding-bar"><div class="funding-fill" style="width: 15%;"></div></div>
+                    <div class="funding-percent">15%</div>
+                    <div class="funding-desc">Security research, tools, and education</div>
+                </div>
+            </div>
+            <p class="funding-note">Every upgrade helps keep Dispatch running and improving. I believe in full transparency—this is exactly where your support goes.</p>
+        </div>
+        
+        <div class="creator-card">
+            <h2>Open Source & Transparency</h2>
+            <p>Dispatch is open source, meaning anyone can inspect the code to verify that there are no backdoors, no tracking, and no hidden data collection. Your trust is earned through transparency.</p>
+            <div class="oss-info">
+                <div class="oss-item">
+                    <span class="oss-label">License:</span>
+                    <span class="oss-value">GNU General Public License v3 (GPLv3)</span>
+                </div>
+                <div class="oss-item">
+                    <span class="oss-label">Repository:</span>
+                    <span class="oss-value"><a href="https://github.com/Dyspatsh/Dispatch" target="_blank" rel="noopener noreferrer">github.com/Dyspatsh/Dispatch</a></span>
+                </div>
+                <div class="oss-item">
+                    <span class="oss-label">Purpose:</span>
+                    <span class="oss-value">Full transparency—see exactly how your data is handled</span>
+                </div>
+                <div class="oss-item">
+                    <span class="oss-label">Report Issues:</span>
+                    <span class="oss-value"><a href="https://github.com/Dyspatsh/Dispatch/issues" target="_blank" rel="noopener noreferrer">GitHub Issues</a></span>
+                </div>
+            </div>
+            <p class="oss-note">The code is open for anyone to audit. This ensures there are no hidden trackers, no backdoors, and no surprises. Your privacy is verifiable.</p>
+        </div>
+        
+        <div class="creator-card">
+            <h2>Project Timeline</h2>
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">Started</div>
+                        <div class="timeline-title">Dispatch was born</div>
+                        <div class="timeline-desc">A personal project to solve the lack of private file sharing on Tor</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">Phase 1</div>
+                        <div class="timeline-title">File Sharing</div>
+                        <div class="timeline-desc">Encrypted file uploads, drag & drop, queue system</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">Phase 2</div>
+                        <div class="timeline-title">Chat System</div>
+                        <div class="timeline-desc">Private chats, group chats, reactions, read receipts</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">Phase 3</div>
+                        <div class="timeline-title">User Profiles</div>
+                        <div class="timeline-desc">Bios, file statistics, user profiles, clickable usernames</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">Current</div>
+                        <div class="timeline-title">Admin Dashboard & Security</div>
+                        <div class="timeline-desc">Analytics, user management, 2FA, session control</div>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot future"></div>
+                    <div class="timeline-content">
+                        <div class="timeline-date">Future</div>
+                        <div class="timeline-title">What's Next?</div>
+                        <div class="timeline-desc">More features, improved performance, and always staying true to privacy</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="creator-card">
+            <h2>Connect With Me</h2>
+            <div class="social-links">
+                <a href="https://github.com/Dyspatsh/Dispatch" target="_blank" rel="noopener noreferrer" class="social-link">
+                    <span class="social-icon">[Git]</span>
+                    <span class="social-name">GitHub</span>
+                    <span class="social-handle">@Dyspatsh</span>
+                </a>
+                <a href="https://x.com/dyspatsh" target="_blank" rel="noopener noreferrer" class="social-link">
+                    <span class="social-icon">[X]</span>
+                    <span class="social-name">X (Twitter)</span>
+                    <span class="social-handle">@dyspatsh</span>
+                </a>
+                <a href="mailto:dispatsh@proton.me" class="social-link">
+                    <span class="social-icon">[✉]</span>
+                    <span class="social-name">Email</span>
+                    <span class="social-handle">dispatsh@proton.me</span>
+                </a>
+                <div class="social-link soon">
+                    <span class="social-icon">[+]</span>
+                    <span class="social-name">WhatsApp Channel</span>
+                    <span class="social-handle">Coming soon</span>
+                </div>
+                <div class="social-link soon">
+                    <span class="social-icon">[+]</span>
+                    <span class="social-name">Discord Server</span>
+                    <span class="social-handle">Coming soon</span>
+                </div>
+                <div class="social-link soon">
+                    <span class="social-icon">[+]</span>
+                    <span class="social-name">YouTube</span>
+                    <span class="social-handle">Coming soon</span>
+                </div>
+                <div class="social-link soon">
+                    <span class="social-icon">[+]</span>
+                    <span class="social-name">TikTok</span>
+                    <span class="social-handle">Coming soon</span>
+                </div>
+                <div class="social-link soon">
+                    <span class="social-icon">[+]</span>
+                    <span class="social-name">Instagram</span>
+                    <span class="social-handle">Coming soon</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="creator-card">
+            <h2>Special Thanks</h2>
+            <p>Dispatch wouldn't be what it is without the trust and support of its users. Thank you for believing in privacy, for choosing anonymous communication, and for supporting a platform that puts users first.</p>
+            <p class="thanks-note">To everyone who has used Dispatch, reported issues, shared feedback, or upgraded to support the project—thank you. You make this possible.</p>
+        </div>
+        
+        <div class="creator-card">
+            <h2>Mission Statement</h2>
+            <div class="mission-quote">
+                <p>"Privacy is not about hiding something. It's about having control over your own information. Dispatch gives you that control."</p>
+                <p class="quote-author">— Elio, Creator of Dispatch</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.creator-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+.creator-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.creator-header h1 {
+    margin-bottom: 0.5rem;
+}
+
+.creator-tagline {
+    font-size: 1rem;
+    color: var(--text-muted);
+}
+
+.creator-content {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.creator-card {
+    background: var(--bg-glass);
+    backdrop-filter: blur(var(--blur-amount));
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
+    padding: 1.5rem;
+    transition: all var(--transition-fast);
+}
+
+.creator-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lg);
+}
+
+.creator-card h2 {
+    margin-bottom: 1rem;
+    font-size: 1.25rem;
+    color: var(--primary);
+    border-left: 3px solid var(--primary);
+    padding-left: 0.75rem;
+}
+
+.creator-card h3 {
+    margin: 1rem 0 0.5rem 0;
+    font-size: 1rem;
+    color: var(--primary);
+}
+
+.creator-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.info-item {
+    flex: 1;
+    min-width: 150px;
+    display: flex;
+    flex-direction: column;
+}
+
+.info-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.info-value {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.bio-section p {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+}
+
+.funding-breakdown {
+    margin: 1rem 0;
+}
+
+.funding-item {
+    margin-bottom: 1rem;
+}
+
+.funding-label {
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+    color: var(--text-primary);
+}
+
+.funding-bar {
+    background: var(--bg-tertiary);
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 0.25rem 0;
+}
+
+.funding-fill {
+    background: var(--gradient-primary);
+    height: 100%;
+    border-radius: 4px;
+}
+
+.funding-percent {
+    font-size: 0.7rem;
+    font-weight: bold;
+    color: var(--primary);
+    margin-top: 0.25rem;
+}
+
+.funding-desc {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.funding-note, .oss-note, .thanks-note {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.75rem;
+    font-style: italic;
+}
+
+.oss-info {
+    margin: 1rem 0;
+}
+
+.oss-item {
+    display: flex;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.oss-label {
+    width: 100px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.oss-value {
+    flex: 1;
+    color: var(--text-secondary);
+}
+
+.oss-value a {
+    color: var(--primary);
+    text-decoration: none;
+}
+
+.oss-value a:hover {
+    text-decoration: underline;
+}
+
+.timeline {
+    position: relative;
+    padding-left: 2rem;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border-light);
+}
+
+.timeline-item {
+    position: relative;
+    margin-bottom: 1.5rem;
+}
+
+.timeline-dot {
+    position: absolute;
+    left: -2rem;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--primary);
+    border: 2px solid var(--bg-primary);
+}
+
+.timeline-dot.future {
+    background: var(--text-muted);
+}
+
+.timeline-content {
+    padding-bottom: 0.5rem;
+}
+
+.timeline-date {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.timeline-title {
+    font-weight: 600;
+    margin: 0.25rem 0;
+    color: var(--text-primary);
+}
+
+.timeline-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.social-links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.social-link {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    text-decoration: none;
+    transition: all var(--transition-fast);
+    border: 1px solid var(--border-light);
+}
+
+.social-link:hover {
+    transform: translateX(5px);
+    border-color: var(--primary);
+    background: var(--bg-glass);
+}
+
+.social-link.soon {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.social-link.soon:hover {
+    transform: none;
+    border-color: var(--border-light);
+}
+
+.social-icon {
+    width: 40px;
+    font-family: monospace;
+    font-size: 1.1rem;
+    color: var(--primary);
+}
+
+.social-name {
+    flex: 1;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.social-handle {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.social-link:hover .social-handle {
+    color: var(--primary);
+}
+
+.mission-quote {
+    text-align: center;
+    padding: 1rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    font-style: italic;
+}
+
+.mission-quote p {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.quote-author {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: var(--primary);
+    font-style: normal;
+}
+
+@media (max-width: 768px) {
+    .oss-item {
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    
+    .oss-label {
+        width: auto;
+    }
+    
+    .info-item {
+        min-width: 120px;
+    }
+    
+    .social-link {
+        flex-wrap: wrap;
+    }
+    
+    .social-name {
+        flex: auto;
+    }
+}
+</style>
+{% endblock %}

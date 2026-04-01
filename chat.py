@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Request, Form, Depends, HTTPException, WebSocket, WebSocketDisconnect, Cookie
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, or_, and_
 from datetime import datetime, timedelta
 import json
 import secrets
 import asyncio
-import re
+import os
 
-from database import get_db, User, ChatConversation, ChatMessage, BlockedUser, Session as DBSession
+from database import get_db, User, ChatConversation, ChatMessage, BlockedUser, Session as DBSession, ChatGroup, GroupMember, GroupChatMessage, MessageReaction, MessageReadReceipt, GroupInvitation
 from roles import check_chat_access, get_chat_char_limit
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -58,31 +59,61 @@ def reset_unread_count(user_id: int, conversation_id: int):
     if key in user_unread_counts:
         user_unread_counts[key] = 0
 
+def can_create_group(user) -> bool:
+    return user.role in ['premium', 'owner']
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: dict = {}
+        self.group_connections: dict = {}
 
-    async def connect(self, websocket: WebSocket, user_id: int):
+    async def connect(self, websocket: WebSocket, user_id: int, group_id: int = None):
         await websocket.accept()
-        self.active_connections[user_id] = websocket
-        online_users[user_id] = True
-        await self.broadcast_status(user_id, "online")
+        if group_id:
+            if group_id not in self.group_connections:
+                self.group_connections[group_id] = {}
+            self.group_connections[group_id][user_id] = websocket
+        else:
+            self.active_connections[user_id] = websocket
+            online_users[user_id] = True
+            await self.broadcast_status(user_id, "online")
 
-    def disconnect(self, user_id: int):
-        if user_id in self.active_connections:
-            del self.active_connections[user_id]
-        if user_id in online_users:
-            del online_users[user_id]
-        asyncio.create_task(self.broadcast_status(user_id, "offline"))
+    def disconnect(self, user_id: int, group_id: int = None):
+        if group_id:
+            if group_id in self.group_connections and user_id in self.group_connections[group_id]:
+                del self.group_connections[group_id][user_id]
+        else:
+            if user_id in self.active_connections:
+                del self.active_connections[user_id]
+            if user_id in online_users:
+                del online_users[user_id]
+            asyncio.create_task(self.broadcast_status(user_id, "offline"))
 
-    async def send_message(self, user_id: int, message: dict):
-        if user_id in self.active_connections:
-            try:
-                await self.active_connections[user_id].send_json(message)
-                return True
-            except:
-                pass
+    async def send_message(self, user_id: int, message: dict, group_id: int = None):
+        if group_id:
+            if group_id in self.group_connections and user_id in self.group_connections[group_id]:
+                try:
+                    await self.group_connections[group_id][user_id].send_json(message)
+                    return True
+                except:
+                    pass
+        else:
+            if user_id in self.active_connections:
+                try:
+                    await self.active_connections[user_id].send_json(message)
+                    return True
+                except:
+                    pass
         return False
+
+    async def broadcast_to_group(self, group_id: int, message: dict, exclude_user_id: int = None):
+        if group_id in self.group_connections:
+            for user_id, connection in self.group_connections[group_id].items():
+                if user_id != exclude_user_id:
+                    try:
+                        await connection.send_json(message)
+                    except:
+                        pass
 
     async def broadcast_status(self, user_id: int, status: str):
         from database import SessionLocal
@@ -97,6 +128,10 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+# ============================================
+# STATIC ROUTES (No parameters - must come FIRST)
+# ============================================
+
 @router.get("/")
 async def messages_page(request: Request, session_token: str = Cookie(None), db: Session = Depends(get_db)):
     user = get_current_user(db, session_token)
@@ -109,12 +144,564 @@ async def messages_page(request: Request, session_token: str = Cookie(None), db:
     sent_invitations = db.query(ChatConversation).filter(((ChatConversation.user1_id == user.id) | (ChatConversation.user2_id == user.id)), ChatConversation.status == "pending", ChatConversation.initiator_id == user.id).all()
     active_conversations = db.query(ChatConversation).filter(((ChatConversation.user1_id == user.id) | (ChatConversation.user2_id == user.id)), ChatConversation.status == "active").order_by(ChatConversation.updated_at.desc()).all()
     
+    # Get pending group invitations
+    pending_group_invites = db.query(GroupInvitation).filter(
+        GroupInvitation.invited_user_id == user.id,
+        GroupInvitation.status == "pending"
+    ).all()
+    
+    # Get sent group invitations
+    sent_group_invites = db.query(GroupInvitation).filter(
+        GroupInvitation.inviter_id == user.id,
+        GroupInvitation.status == "pending"
+    ).all()
+    
     for conv in active_conversations:
         conv.unread_count = get_unread_count(db, user.id, conv.id)
         if conv.unread_count > 0:
             user_unread_counts[f"{user.id}_{conv.id}"] = conv.unread_count
     
-    return templates.TemplateResponse("messages.html", {"request": request, "user": user, "pending_invitations": pending_invitations, "sent_invitations": sent_invitations, "active_conversations": active_conversations, "online_users": online_users})
+    return templates.TemplateResponse("messages.html", {
+        "request": request,
+        "user": user,
+        "pending_invitations": pending_invitations,
+        "sent_invitations": sent_invitations,
+        "active_conversations": active_conversations,
+        "online_users": online_users,
+        "pending_group_invites": pending_group_invites,
+        "sent_group_invites": sent_group_invites
+    })
+
+# ============================================
+# GROUP ROUTES (Static group routes - must come BEFORE parameter routes)
+# ============================================
+
+@router.get("/groups")
+async def groups_page(request: Request, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    groups = db.query(GroupMember).filter(GroupMember.user_id == user.id).options(joinedload(GroupMember.group)).all()
+    user_groups = [gm.group for gm in groups]
+    
+    return templates.TemplateResponse("groups.html", {
+        "request": request,
+        "user": user,
+        "groups": user_groups
+    })
+
+@router.post("/group/update_bio/{group_id}")
+async def update_group_bio(
+    group_id: int,
+    description: str = Form(""),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if not group:
+        return {"success": False, "error": "Group not found"}
+    
+    membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    if not membership or membership.role not in ["owner", "admin"]:
+        return {"success": False, "error": "Only group owners and admins can edit the description"}
+    
+    group.description = escape_html(description) if description else None
+    db.commit()
+    
+    return {"success": True, "message": "Description updated"}
+
+@router.get("/group/{group_id}")
+async def get_group_data(group_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if not group:
+        return {"success": False, "error": "Group not found"}
+    
+    membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    if not membership:
+        return {"success": False, "error": "You are not a member of this group"}
+    
+    messages = db.query(GroupChatMessage).filter(GroupChatMessage.group_id == group_id).order_by(GroupChatMessage.created_at).all()
+    
+    members = db.query(GroupMember).filter(GroupMember.group_id == group_id).options(joinedload(GroupMember.user)).all()
+    members_list = []
+    for m in members:
+        members_list.append({
+            "id": m.user.id,
+            "username": m.user.username,
+            "role": m.role
+        })
+    
+    messages_list = []
+    for msg in messages:
+        read_count = db.query(MessageReadReceipt).filter(MessageReadReceipt.message_id == msg.id).count()
+        messages_list.append({
+            "id": msg.id,
+            "sender_id": msg.sender_id,
+            "sender_username": msg.sender.username,
+            "content": msg.encrypted_content,
+            "created_at": msg.created_at.isoformat(),
+            "expires_at": msg.expires_at.isoformat(),
+            "read_count": read_count,
+            "member_count": len(members_list)
+        })
+    
+    return {
+        "success": True,
+        "group": {
+            "id": group.id,
+            "name": group.name,
+            "description": group.description,
+            "created_at": group.created_at.isoformat(),
+            "created_by": group.created_by.username
+        },
+        "members": members_list,
+        "messages": messages_list,
+        "user_role": membership.role
+    }
+
+@router.post("/group/create")
+async def create_group(
+    name: str = Form(...),
+    description: str = Form(None),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    if not can_create_group(user):
+        return {"success": False, "error": "Group creation requires Premium subscription"}
+    
+    name = escape_html(name)
+    if description:
+        description = escape_html(description)
+    
+    if len(name) < 3:
+        return {"success": False, "error": "Group name must be at least 3 characters"}
+    
+    new_group = ChatGroup(
+        name=name,
+        description=description,
+        created_by_id=user.id
+    )
+    db.add(new_group)
+    db.commit()
+    db.refresh(new_group)
+    
+    member = GroupMember(
+        group_id=new_group.id,
+        user_id=user.id,
+        role="owner"
+    )
+    db.add(member)
+    db.commit()
+    
+    return {"success": True, "group_id": new_group.id, "name": new_group.name}
+
+@router.post("/group/invite/{group_id}")
+async def invite_to_group(
+    group_id: int,
+    username: str = Form(...),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if not group:
+        return {"success": False, "error": "Group not found"}
+    
+    membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    if not membership or membership.role not in ["owner", "admin"]:
+        return {"success": False, "error": "Only group owners and admins can invite users"}
+    
+    username = escape_html(username)
+    target_user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
+    if not target_user:
+        return {"success": False, "error": "User not found"}
+    
+    existing = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == target_user.id).first()
+    if existing:
+        return {"success": False, "error": "User already in group"}
+    
+    existing_invite = db.query(GroupInvitation).filter(
+        GroupInvitation.group_id == group_id,
+        GroupInvitation.invited_user_id == target_user.id,
+        GroupInvitation.status == "pending"
+    ).first()
+    if existing_invite:
+        return {"success": False, "error": "Invitation already pending"}
+    
+    new_invite = GroupInvitation(
+        group_id=group_id,
+        inviter_id=user.id,
+        invited_user_id=target_user.id,
+        status="pending"
+    )
+    db.add(new_invite)
+    db.commit()
+    
+    return {"success": True, "message": f"Invitation sent to {target_user.username}"}
+
+@router.post("/group/invite/accept/{invitation_id}")
+async def accept_group_invitation(
+    invitation_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    invitation = db.query(GroupInvitation).filter(GroupInvitation.id == invitation_id).first()
+    if not invitation or invitation.invited_user_id != user.id or invitation.status != "pending":
+        return {"success": False, "error": "Invalid invitation"}
+    
+    new_member = GroupMember(
+        group_id=invitation.group_id,
+        user_id=user.id,
+        role="member"
+    )
+    db.add(new_member)
+    
+    invitation.status = "accepted"
+    db.commit()
+    
+    return {"success": True, "group_id": invitation.group_id}
+
+@router.post("/group/invite/decline/{invitation_id}")
+async def decline_group_invitation(
+    invitation_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    invitation = db.query(GroupInvitation).filter(GroupInvitation.id == invitation_id).first()
+    if not invitation or invitation.invited_user_id != user.id or invitation.status != "pending":
+        return {"success": False, "error": "Invalid invitation"}
+    
+    invitation.status = "declined"
+    db.commit()
+    
+    return {"success": True}
+
+@router.post("/group/invite/cancel/{invitation_id}")
+async def cancel_group_invitation(
+    invitation_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    invitation = db.query(GroupInvitation).filter(GroupInvitation.id == invitation_id).first()
+    if not invitation or invitation.inviter_id != user.id or invitation.status != "pending":
+        return {"success": False, "error": "Invalid invitation"}
+    
+    db.delete(invitation)
+    db.commit()
+    
+    return {"success": True}
+
+@router.post("/group/send/{group_id}")
+async def send_group_message(
+    group_id: int,
+    content: str = Form(...),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    if not membership:
+        return {"success": False, "error": "You are not a member of this group"}
+    
+    content = escape_html(content)
+    
+    char_limit = get_chat_char_limit(user)
+    if char_limit > 0 and len(content) > char_limit:
+        return {"success": False, "error": f"Message exceeds {char_limit} character limit"}
+    if not content or len(content.strip()) == 0:
+        return {"success": False, "error": "Message cannot be empty"}
+    
+    expires_at = datetime.utcnow() + timedelta(hours=24)
+    new_message = GroupChatMessage(
+        group_id=group_id,
+        sender_id=user.id,
+        encrypted_content=content,
+        expires_at=expires_at,
+        delivered_at=datetime.utcnow()
+    )
+    db.add(new_message)
+    db.commit()
+    
+    await manager.broadcast_to_group(group_id, {
+        "type": "new_group_message",
+        "message": {
+            "id": new_message.id,
+            "sender_id": user.id,
+            "sender_username": user.username,
+            "content": content,
+            "created_at": new_message.created_at.isoformat(),
+            "expires_at": expires_at.isoformat()
+        }
+    })
+    
+    return {"success": True, "message": {"id": new_message.id, "content": content, "created_at": new_message.created_at.isoformat()}}
+
+@router.post("/group/mark_read/{message_id}")
+async def mark_group_message_read(
+    message_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    message = db.query(GroupChatMessage).filter(GroupChatMessage.id == message_id).first()
+    if not message:
+        return {"success": False, "error": "Message not found"}
+    
+    existing = db.query(MessageReadReceipt).filter(
+        MessageReadReceipt.message_id == message_id,
+        MessageReadReceipt.user_id == user.id
+    ).first()
+    
+    if not existing:
+        receipt = MessageReadReceipt(
+            message_id=message_id,
+            user_id=user.id
+        )
+        db.add(receipt)
+        db.commit()
+        
+        read_count = db.query(MessageReadReceipt).filter(MessageReadReceipt.message_id == message_id).count()
+        member_count = db.query(GroupMember).filter(GroupMember.group_id == message.group_id).count()
+        
+        await manager.broadcast_to_group(message.group_id, {
+            "type": "message_read",
+            "message_id": message_id,
+            "user_id": user.id,
+            "read_count": read_count,
+            "total_members": member_count
+        })
+    
+    return {"success": True}
+
+@router.post("/group/react/{message_id}")
+async def add_group_reaction(
+    message_id: int,
+    reaction_type: str = Form(...),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    allowed_reactions = ["like", "thanks", "agree", "helpful"]
+    if reaction_type not in allowed_reactions:
+        return {"success": False, "error": "Invalid reaction type"}
+    
+    message = db.query(GroupChatMessage).filter(GroupChatMessage.id == message_id).first()
+    if not message:
+        return {"success": False, "error": "Message not found"}
+    
+    existing = db.query(MessageReaction).filter(
+        MessageReaction.message_id == message_id,
+        MessageReaction.user_id == user.id
+    ).first()
+    
+    if existing:
+        if existing.reaction_type == reaction_type:
+            db.delete(existing)
+            db.commit()
+            await manager.broadcast_to_group(message.group_id, {
+                "type": "message_reaction",
+                "message_id": message_id,
+                "user_id": user.id,
+                "reaction_type": reaction_type,
+                "action": "removed"
+            })
+            return {"success": True, "action": "removed"}
+        else:
+            existing.reaction_type = reaction_type
+            db.commit()
+            await manager.broadcast_to_group(message.group_id, {
+                "type": "message_reaction",
+                "message_id": message_id,
+                "user_id": user.id,
+                "reaction_type": reaction_type,
+                "action": "updated"
+            })
+            return {"success": True, "action": "updated"}
+    else:
+        new_reaction = MessageReaction(
+            message_id=message_id,
+            user_id=user.id,
+            reaction_type=reaction_type
+        )
+        db.add(new_reaction)
+        db.commit()
+        
+        await manager.broadcast_to_group(message.group_id, {
+            "type": "message_reaction",
+            "message_id": message_id,
+            "user_id": user.id,
+            "reaction_type": reaction_type,
+            "action": "added"
+        })
+        
+        return {"success": True, "action": "added"}
+
+@router.post("/group/remove_member/{group_id}")
+async def remove_group_member(
+    group_id: int,
+    user_id: int = Form(...),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    admin = get_current_user(db, session_token)
+    if not admin:
+        return {"success": False, "error": "Not authenticated"}
+    
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if not group:
+        return {"success": False, "error": "Group not found"}
+    
+    admin_membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == admin.id).first()
+    if not admin_membership or admin_membership.role not in ["owner", "admin"]:
+        return {"success": False, "error": "Only group owners and admins can remove members"}
+    
+    target_membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user_id).first()
+    if not target_membership:
+        return {"success": False, "error": "User is not a member of this group"}
+    
+    if target_membership.role == "owner":
+        return {"success": False, "error": "Cannot remove group owner"}
+    
+    if target_membership.role == "admin" and admin_membership.role != "owner":
+        return {"success": False, "error": "Only group owner can remove admins"}
+    
+    db.delete(target_membership)
+    db.commit()
+    
+    return {"success": True, "message": "User removed from group"}
+
+@router.post("/group/promote_member/{group_id}")
+async def promote_group_member(
+    group_id: int,
+    user_id: int = Form(...),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    admin = get_current_user(db, session_token)
+    if not admin:
+        return {"success": False, "error": "Not authenticated"}
+    
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if not group:
+        return {"success": False, "error": "Group not found"}
+    
+    admin_membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == admin.id).first()
+    if not admin_membership or admin_membership.role not in ["owner", "admin"]:
+        return {"success": False, "error": "Only group owners and admins can promote members"}
+    
+    target_membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user_id).first()
+    if not target_membership:
+        return {"success": False, "error": "User is not a member of this group"}
+    
+    if target_membership.role == "owner":
+        return {"success": False, "error": "Cannot promote group owner"}
+    
+    if target_membership.role == "admin" and admin_membership.role != "owner":
+        return {"success": False, "error": "Only group owner can promote admins"}
+    
+    target_membership.role = "admin"
+    db.commit()
+    
+    return {"success": True, "message": "User promoted to admin"}
+
+@router.post("/group/leave/{group_id}")
+async def leave_group(
+    group_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    if not membership:
+        return {"success": False, "error": "You are not a member of this group"}
+    
+    if membership.role == "owner":
+        oldest_admin = db.query(GroupMember).filter(
+            GroupMember.group_id == group_id,
+            GroupMember.role == "admin"
+        ).order_by(GroupMember.joined_at).first()
+        
+        if oldest_admin:
+            oldest_admin.role = "owner"
+            db.delete(membership)
+            db.commit()
+            return {"success": True, "message": "You left the group. Ownership transferred to another admin."}
+        else:
+            db.delete(membership)
+            group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+            if group:
+                db.delete(group)
+            db.commit()
+            return {"success": True, "message": "You left the group. Group was deleted as you were the only member."}
+    else:
+        db.delete(membership)
+        db.commit()
+        return {"success": True, "message": "You left the group"}
+
+@router.post("/group/delete/{group_id}")
+async def delete_group(
+    group_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    if not membership or membership.role != "owner":
+        return {"success": False, "error": "Only group owner can delete the group"}
+    
+    group = db.query(ChatGroup).filter(ChatGroup.id == group_id).first()
+    if group:
+        db.delete(group)
+        db.commit()
+    
+    return {"success": True, "message": "Group deleted"}
+
+# ============================================
+# PRIVATE CHAT ROUTES (Parameter routes - must come AFTER static/group routes)
+# ============================================
 
 @router.get("/{other_user_id}")
 async def chat_page(request: Request, other_user_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
@@ -148,7 +735,17 @@ async def chat_page(request: Request, other_user_id: int, session_token: str = C
     messages = db.query(ChatMessage).filter(ChatMessage.conversation_id == conv.id).order_by(ChatMessage.created_at.asc()).all()
     other_user_online = other_user_id in online_users
     
-    return templates.TemplateResponse("chat.html", {"request": request, "user": user, "other_user": other_user, "other_user_online": other_user_online, "conversation_id": conv.id, "active_conversations": active_conversations, "messages": messages, "blocked_by_other": blocked_by_other, "blocked_other": blocked_other})
+    return templates.TemplateResponse("chat.html", {
+        "request": request,
+        "user": user,
+        "other_user": other_user,
+        "other_user_online": other_user_online,
+        "conversation_id": conv.id,
+        "active_conversations": active_conversations,
+        "messages": messages,
+        "blocked_by_other": blocked_by_other,
+        "blocked_other": blocked_other
+    })
 
 @router.post("/send")
 async def send_message(recipient_id: int = Form(...), content: str = Form(...), session_token: str = Cookie(None), db: Session = Depends(get_db)):
@@ -185,8 +782,79 @@ async def send_message(recipient_id: int = Form(...), content: str = Form(...), 
     db.commit()
     
     increment_unread_count(recipient_id, conv.id)
-    await manager.send_message(recipient_id, {"type": "new_message", "message": {"id": new_message.id, "sender_id": user.id, "sender_username": user.username, "content": content, "created_at": new_message.created_at.isoformat(), "expires_at": expires_at.isoformat()}, "unread_count": user_unread_counts.get(f"{recipient_id}_{conv.id}", 1)})
+    await manager.send_message(recipient_id, {
+        "type": "new_message",
+        "message": {
+            "id": new_message.id,
+            "sender_id": user.id,
+            "sender_username": user.username,
+            "content": content,
+            "created_at": new_message.created_at.isoformat(),
+            "expires_at": expires_at.isoformat()
+        },
+        "unread_count": user_unread_counts.get(f"{recipient_id}_{conv.id}", 1)
+    })
     return {"success": True, "message": {"id": new_message.id, "content": content, "created_at": new_message.created_at.isoformat(), "expires_at": expires_at.isoformat()}}
+
+@router.post("/mark_read/{message_id}")
+async def mark_message_read(message_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+    if not message:
+        return {"success": False, "error": "Message not found"}
+    
+    if message.read_at is None:
+        message.read_at = datetime.utcnow()
+        db.commit()
+        
+        conv = db.query(ChatConversation).filter(ChatConversation.id == message.conversation_id).first()
+        if conv:
+            other_user_id = conv.user1_id if conv.user2_id == user.id else conv.user2_id
+            await manager.send_message(other_user_id, {
+                "type": "message_read",
+                "message_id": message_id,
+                "user_id": user.id
+            })
+    
+    return {"success": True}
+
+@router.get("/search")
+async def search_messages(
+    q: str,
+    conversation_id: int,
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    if user.role not in ['pro', 'premium', 'owner']:
+        return {"success": False, "error": "Message search requires Pro or Premium subscription"}
+    
+    q = escape_html(q)
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.conversation_id == conversation_id,
+        ChatMessage.encrypted_content.ilike(f"%{q}%")
+    ).order_by(ChatMessage.created_at).all()
+    
+    results = []
+    for msg in messages:
+        results.append({
+            "id": msg.id,
+            "content": msg.encrypted_content,
+            "sender": msg.sender.username,
+            "created_at": msg.created_at.isoformat()
+        })
+    
+    return {"success": True, "results": results}
+
+# ============================================
+# PRIVATE CHAT INVITATION ROUTES
+# ============================================
 
 @router.post("/invite")
 async def send_invitation(
@@ -203,7 +871,7 @@ async def send_invitation(
     if username == user.username:
         return {"success": False, "error": "Cannot invite yourself"}
     
-    recipient = db.query(User).filter(User.username == username).first()
+    recipient = db.query(User).filter(func.lower(User.username) == username.lower()).first()
     if not recipient:
         return {"success": False, "error": "User not found"}
     
@@ -229,7 +897,7 @@ async def send_invitation(
     db.add(new_conv)
     db.commit()
     
-    return {"success": True, "message": "Invitation sent"}
+    return {"success": True, "message": f"Invitation sent to {recipient.username}"}
 
 @router.post("/invite/accept/{conversation_id}")
 async def accept_invitation(
@@ -305,6 +973,10 @@ async def cancel_invitation(
     
     return RedirectResponse(url="/chat", status_code=303)
 
+# ============================================
+# BLOCK USER ENDPOINTS
+# ============================================
+
 @router.post("/block/{user_id}")
 async def block_user(user_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
     user = get_current_user(db, session_token)
@@ -321,7 +993,7 @@ async def block_user(user_id: int, session_token: str = Cookie(None), db: Sessio
         new_block = BlockedUser(user_id=user.id, blocked_user_id=user_id)
         db.add(new_block)
         db.commit()
-    return {"success": True}
+    return {"success": True, "message": "User blocked"}
 
 @router.post("/unblock/{user_id}")
 async def unblock_user(user_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
@@ -332,7 +1004,7 @@ async def unblock_user(user_id: int, session_token: str = Cookie(None), db: Sess
     if block:
         db.delete(block)
         db.commit()
-    return {"success": True}
+    return {"success": True, "message": "User unblocked"}
 
 @router.get("/blocked/list")
 async def get_blocked_list(session_token: str = Cookie(None), db: Session = Depends(get_db)):
@@ -346,6 +1018,10 @@ async def get_blocked_list(session_token: str = Cookie(None), db: Session = Depe
         if blocked_user:
             blocked_users.append({"id": blocked_user.id, "username": blocked_user.username})
     return {"success": True, "blocked_users": blocked_users}
+
+# ============================================
+# WEBSOCKET ENDPOINTS
+# ============================================
 
 @router.websocket("/ws/{conversation_id}")
 async def websocket_endpoint(websocket: WebSocket, conversation_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
@@ -394,7 +1070,84 @@ async def websocket_endpoint(websocket: WebSocket, conversation_id: int, session
                 db.commit()
                 
                 increment_unread_count(other_user_id, conversation_id)
-                await manager.send_message(other_user_id, {"type": "new_message", "message": {"id": new_message.id, "sender_id": user.id, "sender_username": user.username, "content": content, "created_at": new_message.created_at.isoformat(), "expires_at": expires_at.isoformat()}, "unread_count": user_unread_counts.get(f"{other_user_id}_{conversation_id}", 1)})
+                await manager.send_message(other_user_id, {
+                    "type": "new_message",
+                    "message": {
+                        "id": new_message.id,
+                        "sender_id": user.id,
+                        "sender_username": user.username,
+                        "content": content,
+                        "created_at": new_message.created_at.isoformat(),
+                        "expires_at": expires_at.isoformat()
+                    },
+                    "unread_count": user_unread_counts.get(f"{other_user_id}_{conversation_id}", 1)
+                })
                 await websocket.send_json({"type": "message_sent", "message": {"id": new_message.id, "content": content, "created_at": new_message.created_at.isoformat(), "expires_at": expires_at.isoformat()}})
+                
+            elif message_data.get("type") == "typing":
+                await manager.send_message(other_user_id, {"type": "typing", "user_id": user.id, "username": user.username, "is_typing": message_data.get("is_typing", True)})
+                
     except WebSocketDisconnect:
         manager.disconnect(user.id)
+
+@router.websocket("/group/ws/{group_id}")
+async def group_websocket_endpoint(websocket: WebSocket, group_id: int, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user:
+        await websocket.close(code=1008)
+        return
+    
+    membership = db.query(GroupMember).filter(GroupMember.group_id == group_id, GroupMember.user_id == user.id).first()
+    if not membership:
+        await websocket.close(code=1008)
+        return
+    
+    await manager.connect(websocket, user.id, group_id)
+    
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message_data = json.loads(data)
+            
+            if message_data.get("type") == "message":
+                content = message_data.get("content", "")
+                content = escape_html(content)
+                
+                char_limit = get_chat_char_limit(user)
+                if char_limit > 0 and len(content) > char_limit:
+                    await websocket.send_json({"type": "error", "message": f"Message exceeds {char_limit} character limit"})
+                    continue
+                
+                expires_at = datetime.utcnow() + timedelta(hours=24)
+                new_message = GroupChatMessage(
+                    group_id=group_id,
+                    sender_id=user.id,
+                    encrypted_content=content,
+                    expires_at=expires_at,
+                    delivered_at=datetime.utcnow()
+                )
+                db.add(new_message)
+                db.commit()
+                
+                await manager.broadcast_to_group(group_id, {
+                    "type": "new_group_message",
+                    "message": {
+                        "id": new_message.id,
+                        "sender_id": user.id,
+                        "sender_username": user.username,
+                        "content": content,
+                        "created_at": new_message.created_at.isoformat(),
+                        "expires_at": expires_at.isoformat()
+                    }
+                })
+                
+            elif message_data.get("type") == "typing":
+                await manager.broadcast_to_group(group_id, {
+                    "type": "typing",
+                    "user_id": user.id,
+                    "username": user.username,
+                    "is_typing": message_data.get("is_typing", True)
+                }, exclude_user_id=user.id)
+                
+    except WebSocketDisconnect:
+        manager.disconnect(user.id, group_id)

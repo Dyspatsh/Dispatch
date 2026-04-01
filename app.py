@@ -1,3 +1,4 @@
+from fastapi.responses import Response
 from fastapi import FastAPI, Request, Form, Depends, File as FastAPIFile, UploadFile, Cookie
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,43 +16,31 @@ import io
 import base64
 import psutil
 from dotenv import load_dotenv
-from itsdangerous import URLSafeTimedSerializer
-from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy import func, desc
 
-from database import get_db, User, File, Payment, Session as DBSession, ChatConversation, ChatMessage, BlockedUser
+from database import get_db, User, File, Payment, Session as DBSession, ChatConversation, ChatMessage, BlockedUser, LoginHistory
 from chat import router as chat_router
 from roles import router as roles_router
 
 load_dotenv()
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise ValueError("SECRET_KEY must be set in .env file")
 
 app = FastAPI(title="Dispatch")
 
 # Account lockout tracking
 login_attempts = {}
 
-class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        forwarded_proto = request.headers.get("x-forwarded-proto")
-        if forwarded_proto == "https" or request.url.scheme == "https":
-            url = str(request.url).replace("https://", "http://", 1)
-            response = RedirectResponse(url, status_code=307)
-            response.headers["Upgrade-Insecure-Requests"] = "0"
-            response.headers["Strict-Transport-Security"] = "max-age=0"
-            return response
-        return await call_next(request)
-
-app.add_middleware(HTTPSRedirectMiddleware)
 app.include_router(chat_router)
 app.include_router(roles_router)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-UPLOAD_DIR = "/home/dispatch/dyspatch/uploads"
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/home/dispatch/dyspatch/uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def hash_password(password: str) -> str:
@@ -65,7 +54,6 @@ def generate_recovery_phrase() -> str:
     return ''.join(secrets.choice(chars) for _ in range(64))
 
 def escape_html(text: str) -> str:
-    """Escape HTML to prevent XSS attacks - applies to ALL user inputs"""
     if not text:
         return ""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
@@ -121,7 +109,6 @@ def reset_login_attempts(username: str):
         del login_attempts[username]
 
 def is_user_blocked(db: Session, user_id: int, target_id: int) -> bool:
-    """Check if target_id has blocked user_id"""
     block = db.query(BlockedUser).filter(BlockedUser.user_id == target_id, BlockedUser.blocked_user_id == user_id).first()
     return block is not None
 
@@ -171,12 +158,13 @@ def verify_recovery_code(db: Session, user_id: int, code: str) -> bool:
             return True
     return False
 
-# Routes
+# ============================================
+# ROUTES
+# ============================================
+
 @app.get("/")
 async def root():
-    response = RedirectResponse(url="/home", status_code=303)
-    response.headers["Upgrade-Insecure-Requests"] = "0"
-    return response
+    return RedirectResponse(url="/home", status_code=303)
 
 @app.get("/upgrade")
 async def upgrade_redirect():
@@ -215,6 +203,10 @@ async def history_page(request: Request, user = Depends(get_user_from_session), 
 async def about(request: Request, user = Depends(get_user_from_session)):
     return templates.TemplateResponse("about.html", {"request": request, "user": user})
 
+@app.get("/thecreator", response_class=HTMLResponse)
+async def thecreator_page(request: Request, user = Depends(get_user_from_session)):
+    return templates.TemplateResponse("thecreator.html", {"request": request, "user": user})
+
 @app.get("/terms", response_class=HTMLResponse)
 async def terms(request: Request, user = Depends(get_user_from_session)):
     return templates.TemplateResponse("terms.html", {"request": request, "user": user})
@@ -236,7 +228,6 @@ async def recovery_submit(
     confirm_pin: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    # Escape all inputs
     recovery_phrase = escape_html(recovery_phrase)
     new_username = escape_html(new_username) if new_username else None
     
@@ -272,7 +263,7 @@ async def recovery_submit(
         if not valid:
             return templates.TemplateResponse("recovery.html", {"request": request, "error": error})
         
-        existing = db.query(User).filter(User.username == new_username).first()
+        existing = db.query(User).filter(func.lower(User.username) == new_username.lower()).first()
         if existing:
             return templates.TemplateResponse("recovery.html", {"request": request, "error": "Username already taken"})
         
@@ -305,7 +296,7 @@ async def register(request: Request, username: str = Form(...), password: str = 
     if not valid:
         return templates.TemplateResponse("register.html", {"request": request, "error": error})
     
-    existing_user = db.query(User).filter(User.username == username).first()
+    existing_user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
     if existing_user:
         return templates.TemplateResponse("register.html", {"request": request, "error": "Username already exists"})
     
@@ -339,7 +330,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
     if locked:
         return templates.TemplateResponse("login.html", {"request": request, "error": message})
     
-    user = db.query(User).filter(User.username == username).first()
+    user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
     if not user:
         record_failed_login(username)
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
@@ -357,10 +348,15 @@ async def login(request: Request, username: str = Form(...), password: str = For
     
     reset_login_attempts(username)
     
+    # Add to login history
+    login_record = LoginHistory(user_id=user.id)
+    db.add(login_record)
+    
     if user.totp_enabled:
         session_token = create_session(db, user.id, twofa_verified=False)
         response = RedirectResponse(url="/2fa-verify", status_code=303)
         response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False, samesite="lax", max_age=300)
+        db.commit()
         return response
     
     user.last_login = datetime.utcnow()
@@ -555,7 +551,7 @@ async def submit_file(recipient: str = Form(...), filename: str = Form(...), fil
     except:
         file_size_int = 0
     
-    recipient_user = db.query(User).filter(User.username == recipient).first()
+    recipient_user = db.query(User).filter(func.lower(User.username) == recipient.lower()).first()
     if not recipient_user:
         return {"success": False, "error": "Recipient not found"}
     
@@ -591,7 +587,7 @@ async def submit_file(recipient: str = Form(...), filename: str = Form(...), fil
     file_path = os.path.join(UPLOAD_DIR, encrypted_filename)
     with open(file_path, "wb") as f:
         f.write(encrypted_data)
-    new_file = File(sender_id=user.id, recipient_id=recipient_user.id, filename=filename, encrypted_filename=encrypted_filename, file_size=file_size_int, status="pending", options=json.dumps(opts), expires_at=pending_expiry, stealth_mode=False)
+    new_file = File(sender_id=user.id, recipient_id=recipient_user.id, filename=filename, encrypted_filename=encrypted_filename, file_size=file_size_int, status="pending", options=json.dumps(opts), expires_at=pending_expiry)
     db.add(new_file)
     db.commit()
     return {"success": True, "file_id": new_file.id}
@@ -672,7 +668,7 @@ async def search_users(q: str, user = Depends(get_user_from_session), db: Sessio
         return {"users": []}
     q = escape_html(q)
     users = db.query(User).filter(
-        User.username.ilike(f"%{q}%"),
+        func.lower(User.username).contains(q.lower()),
         User.id != user.id,
         User.is_banned == False,
         User.role.in_(['pro', 'premium', 'owner'])
@@ -685,7 +681,97 @@ async def logout():
     response.delete_cookie("session_token")
     return response
 
-# Admin Panel Routes
+# ============================================
+# USER PROFILE ENDPOINTS
+# ============================================
+
+@app.get("/api/user/{username}")
+async def get_user_profile(username: str, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    target_user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
+    if not target_user:
+        return {"success": False, "error": "User not found"}
+    
+    files_sent = db.query(File).filter(File.sender_id == target_user.id).all()
+    files_received = db.query(File).filter(File.recipient_id == target_user.id).all()
+    
+    files_sent_count = len(files_sent)
+    files_received_count = len(files_received)
+    total_storage = sum(f.file_size for f in files_sent) + sum(f.file_size for f in files_received)
+    total_storage_gb = round(total_storage / (1024 * 1024 * 1024), 2)
+    
+    active_files = db.query(File).filter(
+        File.sender_id == target_user.id,
+        File.status.in_(["pending", "accepted"])
+    ).count()
+    
+    return {
+        "success": True,
+        "user": {
+            "id": target_user.id,
+            "username": target_user.username,
+            "role": target_user.role,
+            "created_at": target_user.created_at.isoformat(),
+            "bio": target_user.bio or None,
+            "subscription_expires_at": target_user.subscription_expires_at.isoformat() if target_user.subscription_expires_at else None
+        },
+        "file_stats": {
+            "files_sent": files_sent_count,
+            "files_received": files_received_count,
+            "storage_used_gb": total_storage_gb,
+            "active_files": active_files
+        }
+    }
+
+@app.post("/api/user/bio")
+async def update_bio(
+    bio: str = Form(""),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    if user.role not in ['pro', 'premium', 'owner']:
+        return {"success": False, "error": "Bio requires Pro or Premium subscription"}
+    
+    if len(bio) > 200:
+        return {"success": False, "error": "Bio must be 200 characters or less"}
+    
+    user.bio = escape_html(bio) if bio else None
+    db.commit()
+    
+    return {"success": True, "message": "Bio updated"}
+
+# ============================================
+# SESSIONS (LOGIN HISTORY)
+# ============================================
+
+@app.get("/api/sessions")
+async def get_sessions(session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    cutoff_date = datetime.utcnow() - timedelta(days=30)
+    sessions = db.query(LoginHistory).filter(
+        LoginHistory.user_id == user.id,
+        LoginHistory.login_time >= cutoff_date
+    ).order_by(LoginHistory.login_time.desc()).all()
+    
+    return {
+        "success": True,
+        "sessions": [{"login_time": s.login_time.isoformat()} for s in sessions]
+    }
+
+# ============================================
+# ADMIN PANEL ROUTES
+# ============================================
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_panel(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
@@ -804,7 +890,7 @@ async def admin_search_users(q: str = "", role: str = "all", status: str = "all"
     
     query = db.query(User)
     if q:
-        query = query.filter(User.username.ilike(f"%{q}%"))
+        query = query.filter(func.lower(User.username).contains(q.lower()))
     if role != "all":
         query = query.filter(User.role == role, User.is_banned == False)
     if status == "banned":
@@ -1002,6 +1088,267 @@ async def admin_user_details(user_id: int, user = Depends(get_user_from_session)
             } for f in recent_files
         ]
     }
+
+# ============================================
+# ADMIN CHART ENDPOINTS
+# ============================================
+
+@app.get("/admin/chart/user-growth")
+async def chart_user_growth(days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    labels = []
+    values = []
+    
+    for i in range(days):
+        day_start = datetime.utcnow() - timedelta(days=days-i-1)
+        day_end = day_start + timedelta(days=1)
+        count = db.query(User).filter(User.created_at >= day_start, User.created_at < day_end).count()
+        labels.append(day_start.strftime("%m/%d"))
+        values.append(count)
+    
+    return {"success": True, "labels": labels, "values": values}
+
+@app.get("/admin/chart/file-activity")
+async def chart_file_activity(days: int = 30, type: str = "uploads", session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    labels = []
+    values = []
+    
+    for i in range(days):
+        day_start = datetime.utcnow() - timedelta(days=days-i-1)
+        day_end = day_start + timedelta(days=1)
+        
+        if type == "uploads":
+            count = db.query(File).filter(File.created_at >= day_start, File.created_at < day_end).count()
+        else:
+            count = db.query(File).filter(File.downloaded_at >= day_start, File.downloaded_at < day_end).count()
+        
+        labels.append(day_start.strftime("%m/%d"))
+        values.append(count)
+    
+    return {"success": True, "labels": labels, "values": values}
+
+@app.get("/admin/chart/storage-by-role")
+async def chart_storage_by_role(session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    free_result = db.query(func.sum(File.file_size)).join(User, File.sender_id == User.id).filter(User.role == "user", User.is_banned == False).scalar()
+    pro_result = db.query(func.sum(File.file_size)).join(User, File.sender_id == User.id).filter(User.role == "pro", User.is_banned == False).scalar()
+    premium_result = db.query(func.sum(File.file_size)).join(User, File.sender_id == User.id).filter(User.role == "premium", User.is_banned == False).scalar()
+    
+    free_storage = float(free_result) if free_result else 0
+    pro_storage = float(pro_result) if pro_result else 0
+    premium_storage = float(premium_result) if premium_result else 0
+    
+    return {
+        "success": True,
+        "free": round(free_storage / (1024 * 1024 * 1024), 1),
+        "pro": round(pro_storage / (1024 * 1024 * 1024), 1),
+        "premium": round(premium_storage / (1024 * 1024 * 1024), 1)
+    }
+
+@app.get("/admin/chart/storage-trend")
+async def chart_storage_trend(days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    labels = []
+    values = []
+    
+    for i in range(days):
+        day_end = datetime.utcnow() - timedelta(days=days-i-1)
+        storage_result = db.query(func.sum(File.file_size)).filter(File.created_at <= day_end).scalar()
+        storage = float(storage_result) if storage_result else 0
+        labels.append(day_end.strftime("%m/%d"))
+        values.append(round(storage / (1024 * 1024 * 1024), 1))
+    
+    start_value = values[0] if values else 0
+    end_value = values[-1] if values else 0
+    growth = end_value - start_value
+    growth_percent = round((growth / start_value * 100), 1) if start_value > 0 else 0
+    
+    return {
+        "success": True,
+        "labels": labels,
+        "values": values,
+        "start_value": start_value,
+        "end_value": end_value,
+        "growth": round(growth, 1),
+        "growth_percent": growth_percent
+    }
+
+@app.get("/admin/chart/activity-heatmap")
+async def chart_activity_heatmap(days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    activities = []
+    
+    for i in range(days):
+        day_start = datetime.utcnow() - timedelta(days=days-i-1)
+        day_end = day_start + timedelta(days=1)
+        
+        login_count = db.query(LoginHistory).filter(LoginHistory.login_time >= day_start, LoginHistory.login_time < day_end).count()
+        upload_count = db.query(File).filter(File.created_at >= day_start, File.created_at < day_end).count()
+        download_count = db.query(File).filter(File.downloaded_at >= day_start, File.downloaded_at < day_end).count()
+        
+        total = login_count + upload_count + download_count
+        
+        activities.append({
+            "date": day_start.strftime("%Y-%m-%d"),
+            "count": total
+        })
+    
+    return {"success": True, "activities": activities}
+
+@app.get("/admin/failed-logins")
+async def admin_failed_logins(session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    failed = db.query(User).filter(User.failed_login_attempts > 0).order_by(desc(User.last_failed_login)).limit(20).all()
+    
+    logins = []
+    for u in failed:
+        logins.append({
+            "username": u.username,
+            "attempts": u.failed_login_attempts,
+            "last_attempt": u.last_failed_login.strftime("%Y-%m-%d %H:%M") if u.last_failed_login else "Never"
+        })
+    
+    return {"success": True, "logins": logins}
+
+@app.get("/admin/active-logs")
+async def admin_active_logs(session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    logs = []
+    
+    recent_logins = db.query(User).filter(User.last_login > datetime.utcnow() - timedelta(hours=24)).order_by(desc(User.last_login)).limit(10).all()
+    for log in recent_logins:
+        logs.append({"type": "login", "username": log.username, "time": log.last_login.strftime("%H:%M:%S"), "details": "User logged in"})
+    
+    recent_uploads = db.query(File).order_by(desc(File.created_at)).limit(10).all()
+    for file in recent_uploads:
+        logs.append({"type": "upload", "username": file.sender.username, "time": file.created_at.strftime("%H:%M:%S"), "details": f"Uploaded file: {file.filename}"})
+    
+    recent_downloads = db.query(File).filter(File.downloaded_at != None).order_by(desc(File.downloaded_at)).limit(10).all()
+    for file in recent_downloads:
+        logs.append({"type": "download", "username": file.recipient.username, "time": file.downloaded_at.strftime("%H:%M:%S"), "details": f"Downloaded file: {file.filename}"})
+    
+    logs.sort(key=lambda x: x["time"], reverse=True)
+    logs = logs[:30]
+    
+    return {"success": True, "logs": logs}
+
+@app.get("/admin/export")
+async def admin_export(
+    users: bool = True,
+    files: bool = True,
+    logs: bool = False,
+    days: str = "all",
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    cutoff = None
+    if days != "all":
+        cutoff = datetime.utcnow() - timedelta(days=int(days))
+    
+    import csv
+    import io
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    if users:
+        writer.writerow(["User ID", "Username", "Role", "Created At", "Last Login", "Files Sent", "Files Received", "Storage Used (GB)", "Is Banned", "2FA Enabled"])
+        all_users = db.query(User).all()
+        for u in all_users:
+            files_sent = db.query(File).filter(File.sender_id == u.id).count()
+            files_received = db.query(File).filter(File.recipient_id == u.id).count()
+            storage = db.query(func.sum(File.file_size)).filter(File.sender_id == u.id).scalar() or 0
+            writer.writerow([
+                u.id, u.username, u.role, u.created_at.strftime("%Y-%m-%d %H:%M"),
+                u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "Never",
+                files_sent, files_received, round(storage / (1024 * 1024 * 1024), 2),
+                "Yes" if u.is_banned else "No", "Yes" if u.totp_enabled else "No"
+            ])
+    
+    if files:
+        writer.writerow([])
+        writer.writerow(["File ID", "Filename", "Sender", "Recipient", "Size (MB)", "Status", "Created At", "Expires At", "Downloaded At"])
+        query = db.query(File)
+        if cutoff:
+            query = query.filter(File.created_at >= cutoff)
+        all_files = query.all()
+        for f in all_files:
+            writer.writerow([
+                f.id, f.filename, f.sender.username, f.recipient.username,
+                round(f.file_size / (1024 * 1024), 2), f.status,
+                f.created_at.strftime("%Y-%m-%d %H:%M"),
+                f.expires_at.strftime("%Y-%m-%d %H:%M") if f.expires_at else "Never",
+                f.downloaded_at.strftime("%Y-%m-%d %H:%M") if f.downloaded_at else "Never"
+            ])
+    
+    if logs:
+        writer.writerow([])
+        writer.writerow(["Date", "Username", "Event Type", "Details"])
+        login_logs = db.query(LoginHistory).filter(LoginHistory.login_time >= cutoff if cutoff else True).order_by(desc(LoginHistory.login_time)).limit(500).all()
+        for l in login_logs:
+            writer.writerow([l.login_time.strftime("%Y-%m-%d %H:%M"), l.user.username, "Login", "User logged in"])
+    
+    response = Response(
+        output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=dispatch_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"}
+    )
+    return response
+
+@app.get("/admin/export/files")
+async def admin_export_files(session_token: str = Cookie(None), db: Session = Depends(get_db)):
+    user = get_current_user(db, session_token)
+    if not user or user.role != "owner":
+        return {"success": False, "error": "Unauthorized"}
+    
+    import csv
+    import io
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["File ID", "Filename", "Sender", "Recipient", "Size (MB)", "Status", "Created At", "Expires At"])
+    
+    all_files = db.query(File).order_by(desc(File.created_at)).all()
+    for f in all_files:
+        writer.writerow([
+            f.id, f.filename, f.sender.username, f.recipient.username,
+            round(f.file_size / (1024 * 1024), 2), f.status,
+            f.created_at.strftime("%Y-%m-%d %H:%M"),
+            f.expires_at.strftime("%Y-%m-%d %H:%M") if f.expires_at else "Never"
+        ])
+    
+    response = Response(
+        output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=dispatch_files_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"}
+    )
+    return response
 
 # 404 handler
 @app.exception_handler(404)

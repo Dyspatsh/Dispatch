@@ -3,177 +3,1097 @@
 {% block title %}Settings{% endblock %}
 
 {% block content %}
-<div class="profile-container">
+<div class="settings-container">
     <h1>Settings</h1>
     
-    <div class="settings-section">
-        <h2>My Account</h2>
-        <div class="account-info">
-            <p><strong>Username:</strong> {{ user.username }}</p>
-            <p><strong>Role:</strong> {{ user.role }}</p>
-            <p><strong>Member since:</strong> {{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
-            <p><strong>Account age:</strong> {{ ((now - user.created_at).days) }} days</p>
-            {% if user.role in ['pro', 'premium'] and user.subscription_expires_at %}
-                {% set days_left = (user.subscription_expires_at - now).days %}
-                {% if days_left > 0 %}
-                <p><strong>Subscription expires in:</strong> {{ days_left }} days</p>
-                {% endif %}
-            {% endif %}
-        </div>
-    </div>
-    
-    <div class="settings-section">
-        <h2>Upgrade Account</h2>
-        <div class="action-item">
-            <div class="action-info">
-                <h3>Get More Features</h3>
-                <p>Upgrade to Pro or Premium for advanced features</p>
+    <div class="settings-layout">
+        <div class="settings-sidebar">
+            <div class="settings-menu">
+                <button class="settings-menu-item active" data-section="myaccount">
+                    <span class="menu-icon">[ ]</span>
+                    <span>My Account</span>
+                </button>
+                <button class="settings-menu-item" data-section="upgrade">
+                    <span class="menu-icon">[↑]</span>
+                    <span>Upgrade Account</span>
+                </button>
+                <button class="settings-menu-item" data-section="actions">
+                    <span class="menu-icon">[⚙]</span>
+                    <span>Actions</span>
+                </button>
+                <button class="settings-menu-item" data-section="2fa">
+                    <span class="menu-icon">[🔐]</span>
+                    <span>Two-Factor Authentication</span>
+                </button>
+                <button class="settings-menu-item" data-section="blocked">
+                    <span class="menu-icon">[🚫]</span>
+                    <span>Blocked Users</span>
+                </button>
+                <button class="settings-menu-item" data-section="sessions">
+                    <span class="menu-icon">[📋]</span>
+                    <span>Sessions</span>
+                </button>
+                <button class="settings-menu-item" data-section="logout">
+                    <span class="menu-icon">[→]</span>
+                    <span>Logout</span>
+                </button>
             </div>
-            <a href="/upgrade" class="btn btn-primary">Upgrade</a>
-        </div>
-    </div>
-    
-    <div class="settings-section">
-        <h2>Actions</h2>
-        
-        <div class="action-item">
-            <div class="action-info">
-                <h3>Theme</h3>
-                <p>Switch between light and dark mode</p>
-            </div>
-            <label class="theme-switch">
-                <input type="checkbox" id="themeToggle" {% if user.theme == 'dark' %}checked{% endif %}>
-                <span class="theme-slider"></span>
-            </label>
         </div>
         
-        <div class="action-item">
-            <div class="action-info">
-                <h3>Change Password</h3>
-                <p>Update your account password</p>
+        <div class="settings-content">
+            <button id="settingsBackBtn" class="settings-back-btn" style="display: none;">← Back</button>
+            
+            <div id="section-myaccount" class="settings-section active">
+                <h2>My Account</h2>
+                
+                <div class="account-info">
+                    <div class="info-row">
+                        <span class="info-label">Username:</span>
+                        <span class="info-value">{{ user.username }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Role:</span>
+                        <span class="info-value role-badge">{{ user.role|capitalize }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Member since:</span>
+                        <span class="info-value">{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Account age:</span>
+                        <span class="info-value">{{ ((now - user.created_at).days) }} days</span>
+                    </div>
+                    {% if user.subscription_expires_at and user.role in ['pro', 'premium'] %}
+                    <div class="info-row">
+                        <span class="info-label">Subscription expires:</span>
+                        <span class="info-value">{{ user.subscription_expires_at.strftime('%Y-%m-%d') }} ({{ ((user.subscription_expires_at - now).days) }} days left)</span>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="bio-section">
+                    <h3>Bio</h3>
+                    <div class="bio-display" id="bioDisplay">
+                        {% if user.bio %}
+                            <p>{{ user.bio }}</p>
+                        {% else %}
+                            <p class="bio-empty">No bio set yet</p>
+                        {% endif %}
+                    </div>
+                    {% if user.role in ['pro', 'premium', 'owner'] %}
+                    <button id="editBioBtn" class="btn btn-secondary btn-small">Edit Bio</button>
+                    {% else %}
+                    <div class="bio-upgrade-warning">
+                        <p>Bio is available for Pro and Premium users. <a href="/roles/upgrade">Upgrade to set your bio</a></p>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div class="file-stats-section">
+                    <h3>File Statistics</h3>
+                    <div class="stats-grid" id="fileStats">
+                        <div class="stat-item">
+                            <div class="stat-value" id="filesSent">...</div>
+                            <div class="stat-label">Files Sent</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="filesReceived">...</div>
+                            <div class="stat-label">Files Received</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="storageUsed">...</div>
+                            <div class="stat-label">Storage Used</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="activeFiles">...</div>
+                            <div class="stat-label">Active Files</div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <a href="/profile/change-password" class="btn btn-secondary">Change Password</a>
-        </div>
-        
-        <div class="action-item">
-            <div class="action-info">
-                <h3>Change PIN</h3>
-                <p>Update your 6-digit login PIN</p>
+            
+            <div id="section-upgrade" class="settings-section">
+                <h2>Upgrade Account</h2>
+                <div class="upgrade-info">
+                    <p>Get more features by upgrading to Pro or Premium:</p>
+                    <ul class="feature-list">
+                        <li>✓ Larger file transfers (up to 10 GB)</li>
+                        <li>✓ Private encrypted chat</li>
+                        <li>✓ Custom file expiration (1-7 days)</li>
+                        <li>✓ Password-protected files</li>
+                        <li>✓ Bio and profile features</li>
+                        <li>✓ And much more...</li>
+                    </ul>
+                    <button id="upgradeNowBtn" class="btn btn-primary">Upgrade Now</button>
+                </div>
             </div>
-            <a href="/profile/change-pin" class="btn btn-secondary">Change PIN</a>
-        </div>
-        
-        <div class="action-item danger-item">
-            <div class="action-info">
-                <h3>Delete Account</h3>
-                <p>Permanently delete your account and all data</p>
+            
+            <div id="section-actions" class="settings-section">
+                <h2>Actions</h2>
+                
+                <div class="action-item">
+                    <div class="action-info">
+                        <h3>Theme</h3>
+                        <p>Switch between light and dark mode</p>
+                    </div>
+                    <label class="theme-switch">
+                        <input type="checkbox" id="themeToggle" {% if user.theme == 'dark' %}checked{% endif %}>
+                        <span class="theme-slider"></span>
+                    </label>
+                </div>
+                
+                <div class="action-item">
+                    <div class="action-info">
+                        <h3>Read Receipts</h3>
+                        <p>Show when messages are read (Premium only)</p>
+                    </div>
+                    <label class="read-receipts-switch">
+                        <input type="checkbox" id="readReceiptsToggle" {% if user.read_receipts_enabled %}checked{% endif %} {% if user.role not in ['premium', 'owner'] %}disabled{% endif %}>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                
+                <div class="action-item">
+                    <div class="action-info">
+                        <h3>Change Password</h3>
+                        <p>Update your account password</p>
+                    </div>
+                    <button id="changePasswordBtn" class="btn btn-secondary">Change Password</button>
+                </div>
+                
+                <div class="action-item">
+                    <div class="action-info">
+                        <h3>Change PIN</h3>
+                        <p>Update your 6-digit login PIN</p>
+                    </div>
+                    <button id="changePinBtn" class="btn btn-secondary">Change PIN</button>
+                </div>
+                
+                <div class="action-item danger-item">
+                    <div class="action-info">
+                        <h3>Delete Account</h3>
+                        <p>Permanently delete your account and all data</p>
+                    </div>
+                    <button id="deleteAccountBtn" class="btn btn-danger">Delete Account</button>
+                </div>
             </div>
-            <a href="/profile/delete-account" class="btn btn-danger">Delete Account</a>
+            
+            <div id="section-2fa" class="settings-section">
+                <h2>Two-Factor Authentication</h2>
+                <div class="twofa-info">
+                    <p>Add an extra layer of security to your account</p>
+                    <div class="twofa-status">
+                        <span class="status-label">Current Status:</span>
+                        <span class="status-value {% if user.totp_enabled %}status-enabled{% else %}status-disabled{% endif %}">
+                            {% if user.totp_enabled %}Enabled{% else %}Disabled{% endif %}
+                        </span>
+                    </div>
+                    {% if user.totp_enabled %}
+                        <button id="disable2faBtn" class="btn btn-danger">Disable 2FA</button>
+                    {% else %}
+                        <a href="/profile/enable-2fa" class="btn btn-primary">Enable 2FA</a>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div id="section-blocked" class="settings-section">
+                <h2>Blocked Users</h2>
+                <div id="blockedUsersList" class="blocked-users-list">
+                    <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+            
+            <div id="section-sessions" class="settings-section">
+                <h2>Sessions</h2>
+                <div id="sessionsList" class="sessions-list">
+                    <div class="loading-spinner">Loading...</div>
+                </div>
+            </div>
+            
+            <div id="section-logout" class="settings-section">
+                <h2>Logout</h2>
+                <div class="logout-info">
+                    <p>Are you sure you want to sign out?</p>
+                    <div class="logout-actions">
+                        <button id="cancelLogoutBtn" class="btn btn-secondary">Cancel</button>
+                        <button id="confirmLogoutBtn" class="btn btn-primary">Logout</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
-    
-    <div class="settings-section">
-        <h2>Two-Factor Authentication</h2>
-        <div class="action-item">
-            <div class="action-info">
-                <h3>Two-Factor Authentication</h3>
-                <p>Add an extra layer of security to your account</p>
-            </div>
-            {% if user.totp_enabled %}
-                <form method="post" action="/profile/disable-2fa" onsubmit="return confirm('Disable 2FA? This will make your account less secure.')">
-                    <button type="submit" class="btn btn-danger">Disable 2FA</button>
-                </form>
-            {% else %}
-                <a href="/profile/enable-2fa" class="btn btn-primary">Enable 2FA</a>
-            {% endif %}
+</div>
+
+<div id="editBioModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Edit Bio</h3>
+            <button class="modal-close" onclick="closeEditBioModal()">[X]</button>
         </div>
-    </div>
-    
-    <div class="settings-section">
-        <h2>Blocked Users</h2>
-        <div class="blocked-users-scroll">
-            <div id="blockedList" class="blocked-list">
-                <p class="empty-message">Loading blocked users...</p>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="bioText">Bio (max 200 characters)</label>
+                <textarea id="bioText" rows="4" maxlength="200" placeholder="Tell others about yourself...">{{ user.bio or '' }}</textarea>
+                <small><span id="bioCharCount">0</span>/200 characters</small>
             </div>
         </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeEditBioModal()">Cancel</button>
+            <button id="saveBioBtn" class="btn-primary">Save Bio</button>
+        </div>
     </div>
-    
-    <div class="settings-section">
-        <h2>Session</h2>
-        <div class="action-item">
-            <div class="action-info">
-                <h3>Logout</h3>
-                <p>Sign out of your account</p>
+</div>
+
+<div id="changePasswordModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Change Password</h3>
+            <button class="modal-close" onclick="closeChangePasswordModal()">[X]</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="currentPassword">Current Password</label>
+                <input type="password" id="currentPassword" required>
             </div>
-            <a href="/logout" class="btn btn-secondary">Logout</a>
+            <div class="form-group">
+                <label for="newPassword">New Password</label>
+                <input type="password" id="newPassword" required>
+                <small>8-16 characters, at least one capital letter, one number, and one symbol</small>
+            </div>
+            <div class="form-group">
+                <label for="confirmPassword">Confirm New Password</label>
+                <input type="password" id="confirmPassword" required>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeChangePasswordModal()">Cancel</button>
+            <button id="submitPasswordChangeBtn" class="btn-primary">Change Password</button>
+        </div>
+    </div>
+</div>
+
+<div id="changePinModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Change PIN</h3>
+            <button class="modal-close" onclick="closeChangePinModal()">[X]</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="currentPin">Current PIN (6 digits)</label>
+                <input type="password" id="currentPin" maxlength="6" pattern="[0-9]{6}" required>
+            </div>
+            <div class="form-group">
+                <label for="newPin">New PIN (6 digits)</label>
+                <input type="password" id="newPin" maxlength="6" pattern="[0-9]{6}" required>
+            </div>
+            <div class="form-group">
+                <label for="confirmPin">Confirm New PIN</label>
+                <input type="password" id="confirmPin" maxlength="6" pattern="[0-9]{6}" required>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeChangePinModal()">Cancel</button>
+            <button id="submitPinChangeBtn" class="btn-primary">Change PIN</button>
+        </div>
+    </div>
+</div>
+
+<div id="deleteAccountModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Delete Account</h3>
+            <button class="modal-close" onclick="closeDeleteAccountModal()">[X]</button>
+        </div>
+        <div class="modal-body">
+            <div class="warning-text">
+                <p>Warning: This action is permanent and cannot be undone. All your files and data will be permanently deleted.</p>
+            </div>
+            <div class="form-group">
+                <label for="deletePassword">Enter your password to confirm</label>
+                <input type="password" id="deletePassword" required>
+            </div>
+            <div class="form-group">
+                <label for="deleteConfirm">Type "DELETE" to confirm</label>
+                <input type="text" id="deleteConfirm" required>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeDeleteAccountModal()">Cancel</button>
+            <button id="confirmDeleteBtn" class="btn-danger">Permanently Delete Account</button>
         </div>
     </div>
 </div>
 
 <style>
-.blocked-users-scroll {
-    max-height: 200px;
-    overflow-y: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+.settings-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem;
 }
-.blocked-users-scroll::-webkit-scrollbar {
+
+.settings-layout {
+    display: flex;
+    gap: 2rem;
+    background: var(--bg-glass);
+    backdrop-filter: blur(var(--blur-amount));
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
+    overflow: hidden;
+    min-height: 500px;
+}
+
+.settings-sidebar {
+    width: 250px;
+    background: var(--bg-tertiary);
+    border-right: 1px solid var(--border-light);
+    flex-shrink: 0;
+}
+
+.settings-menu {
+    padding: 1rem 0;
+}
+
+.settings-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.75rem 1.5rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
+    text-align: left;
+}
+
+.settings-menu-item:hover {
+    background: var(--bg-primary);
+    color: var(--primary);
+}
+
+.settings-menu-item.active {
+    background: var(--gradient-primary);
+    color: white;
+}
+
+.menu-icon {
+    width: 24px;
+    font-family: monospace;
+}
+
+.settings-content {
+    flex: 1;
+    padding: 1.5rem;
+    overflow-y: auto;
+    max-height: 70vh;
+}
+
+.settings-section {
     display: none;
+    animation: fadeIn 0.3s ease;
+}
+
+.settings-section.active {
+    display: block;
+}
+
+.settings-back-btn {
+    display: none;
+    margin-bottom: 1rem;
+    padding: 0.5rem 1rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--primary);
+    font-size: 0.9rem;
+}
+
+.settings-back-btn:hover {
+    text-decoration: underline;
+}
+
+.info-row {
+    display: flex;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.info-label {
+    width: 150px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.info-value {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.role-badge {
+    display: inline-block;
+    background: var(--gradient-primary);
+    padding: 0.2rem 0.6rem;
+    border-radius: var(--radius-sm);
+    color: white;
+    font-size: 0.8rem;
+}
+
+.bio-section, .file-stats-section, .twofa-info, .upgrade-info, .logout-info {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-light);
+}
+
+.bio-section h3, .file-stats-section h3 {
+    margin-bottom: 0.75rem;
+    font-size: 1rem;
+}
+
+.bio-display {
+    background: var(--bg-tertiary);
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    margin-bottom: 0.75rem;
+}
+
+.bio-empty {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.bio-upgrade-warning {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: rgba(245, 175, 25, 0.1);
+    border-left: 3px solid var(--warning);
+    font-size: 0.8rem;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+.stat-item {
+    text-align: center;
+    padding: 1rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--primary);
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+.action-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.action-item:last-child {
+    border-bottom: none;
+}
+
+.action-info h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 1rem;
+}
+
+.action-info p {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.danger-item .action-info h3 {
+    color: var(--danger);
+}
+
+.theme-switch, .read-receipts-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 26px;
+}
+
+.theme-switch input, .read-receipts-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.theme-slider, .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--border-medium);
+    transition: 0.3s;
+    border-radius: 34px;
+}
+
+.theme-slider:before, .toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 3px;
+    bottom: 3px;
+    background-color: white;
+    transition: 0.3s;
+    border-radius: 50%;
+}
+
+input:checked + .theme-slider, input:checked + .toggle-slider {
+    background-color: var(--primary);
+}
+
+input:checked + .theme-slider:before, input:checked + .toggle-slider:before {
+    transform: translateX(24px);
+}
+
+.twofa-status {
+    margin: 1rem 0;
+    padding: 0.75rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.status-enabled {
+    color: var(--success);
+    font-weight: bold;
+}
+
+.status-disabled {
+    color: var(--danger);
+    font-weight: bold;
+}
+
+.blocked-users-list, .sessions-list {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.blocked-user-item, .session-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.blocked-username {
+    font-weight: 500;
+}
+
+.session-time {
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 1rem 0;
+}
+
+.feature-list li {
+    padding: 0.25rem 0;
+    color: var(--text-secondary);
+}
+
+.logout-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.loading-spinner {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-muted);
+}
+
+.warning-text {
+    background: rgba(231, 76, 60, 0.1);
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    margin-bottom: 1rem;
+    color: var(--danger);
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+}
+
+.modal-content {
+    background: var(--bg-glass-solid);
+    backdrop-filter: blur(var(--blur-amount));
+    margin: 10% auto;
+    border-radius: var(--radius-lg);
+    width: 90%;
+    max-width: 450px;
+    border: 1px solid var(--border-light);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: var(--primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.modal-body {
+    padding: 1.25rem;
+}
+
+.modal-footer {
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+@media (max-width: 768px) {
+    .settings-layout {
+        flex-direction: column;
+    }
+    
+    .settings-sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border-light);
+    }
+    
+    .settings-menu {
+        display: flex;
+        overflow-x: auto;
+        padding: 0.5rem;
+        gap: 0.25rem;
+    }
+    
+    .settings-menu-item {
+        white-space: nowrap;
+        padding: 0.5rem 1rem;
+    }
+    
+    .settings-back-btn {
+        display: inline-flex;
+    }
+    
+    .info-row {
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    
+    .info-label {
+        width: auto;
+    }
+    
+    .action-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 </style>
 
 <script>
-    const themeToggle = document.getElementById('themeToggle');
-    if (themeToggle) {
-        themeToggle.addEventListener('change', function() {
-            const newTheme = this.checked ? 'dark' : 'light';
-            document.body.className = newTheme;
-            localStorage.setItem('theme', newTheme);
-            fetch('/profile/change-theme', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'theme=' + newTheme
-            });
+const themeToggle = document.getElementById('themeToggle');
+if (themeToggle) {
+    themeToggle.addEventListener('change', function() {
+        const newTheme = this.checked ? 'dark' : 'light';
+        document.body.className = newTheme;
+        localStorage.setItem('theme', newTheme);
+        fetch('/profile/change-theme', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'theme=' + newTheme
         });
+    });
+}
+
+const readReceiptsToggle = document.getElementById('readReceiptsToggle');
+if (readReceiptsToggle) {
+    readReceiptsToggle.addEventListener('change', function() {
+        fetch('/chat/settings/read_receipts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'enabled=' + this.checked
+        }).then(res => res.json()).then(data => {
+            if (!data.success) {
+                toast.error(data.error);
+                this.checked = !this.checked;
+            } else {
+                toast.success('Read receipts ' + (this.checked ? 'enabled' : 'disabled'));
+            }
+        });
+    });
+}
+
+const menuItems = document.querySelectorAll('.settings-menu-item');
+const sections = document.querySelectorAll('.settings-section');
+const backBtn = document.getElementById('settingsBackBtn');
+
+function showSection(sectionId) {
+    sections.forEach(section => {
+        section.classList.remove('active');
+    });
+    const activeSection = document.getElementById('section-' + sectionId);
+    if (activeSection) {
+        activeSection.classList.add('active');
     }
     
-    function loadBlockedContacts() {
-        fetch('/chat/blocked/list')
-            .then(res => res.json())
-            .then(data => {
-                const blockedList = document.getElementById('blockedList');
-                if (data.success && data.blocked_users && data.blocked_users.length > 0) {
-                    blockedList.innerHTML = data.blocked_users.map(user => `
-                        <div class="blocked-item">
-                            <span class="blocked-username">${escapeHtml(user.username)}</span>
-                            <button class="btn btn-small btn-secondary" onclick="unblockUser(${user.id})">Unblock</button>
-                        </div>
-                    `).join('');
-                } else {
-                    blockedList.innerHTML = '<p class="empty-message">No blocked users</p>';
-                }
-            });
+    menuItems.forEach(item => {
+        item.classList.remove('active');
+        if (item.dataset.section === sectionId) {
+            item.classList.add('active');
+        }
+    });
+    
+    if (sectionId === 'blocked') {
+        loadBlockedUsers();
+    } else if (sectionId === 'sessions') {
+        loadSessions();
+    } else if (sectionId === 'myaccount') {
+        loadFileStats();
     }
     
-    function unblockUser(userId) {
-        fetch('/chat/unblock/' + userId, { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    loadBlockedContacts();
-                } else {
-                    alert('Error: ' + (data.error || 'Failed to unblock user'));
-                }
-            });
+    if (window.innerWidth <= 768 && sectionId !== 'myaccount') {
+        backBtn.style.display = 'inline-flex';
+    } else {
+        backBtn.style.display = 'none';
+    }
+}
+
+menuItems.forEach(item => {
+    item.addEventListener('click', () => {
+        const sectionId = item.dataset.section;
+        showSection(sectionId);
+    });
+});
+
+if (backBtn) {
+    backBtn.addEventListener('click', () => {
+        showSection('myaccount');
+    });
+}
+
+function loadFileStats() {
+    fetch('/api/user/{{ user.username }}')
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('filesSent').textContent = data.file_stats.files_sent;
+                document.getElementById('filesReceived').textContent = data.file_stats.files_received;
+                document.getElementById('storageUsed').textContent = data.file_stats.storage_used_gb + ' GB';
+                document.getElementById('activeFiles').textContent = data.file_stats.active_files;
+            }
+        });
+}
+
+function loadBlockedUsers() {
+    fetch('/chat/blocked/list')
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById('blockedUsersList');
+            if (data.success && data.blocked_users && data.blocked_users.length > 0) {
+                container.innerHTML = data.blocked_users.map(user => `
+                    <div class="blocked-user-item">
+                        <span class="blocked-username">${escapeHtml(user.username)}</span>
+                        <button class="btn btn-small btn-secondary unblock-btn" data-user-id="${user.id}">Unblock</button>
+                    </div>
+                `).join('');
+                
+                container.querySelectorAll('.unblock-btn').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const userId = btn.dataset.userId;
+                        fetch('/chat/unblock/' + userId, { method: 'POST' })
+                            .then(res => res.json())
+                            .then(data => {
+                                if (data.success) {
+                                    toast.success('User unblocked');
+                                    loadBlockedUsers();
+                                } else {
+                                    toast.error(data.error);
+                                }
+                            });
+                    });
+                });
+            } else {
+                container.innerHTML = '<div class="empty-state">You haven\'t blocked any users</div>';
+            }
+        });
+}
+
+function loadSessions() {
+    fetch('/api/sessions')
+        .then(res => res.json())
+        .then(data => {
+            const container = document.getElementById('sessionsList');
+            if (data.success && data.sessions && data.sessions.length > 0) {
+                container.innerHTML = data.sessions.map(session => `
+                    <div class="session-item">
+                        <span class="session-time">${new Date(session.login_time).toLocaleString()}</span>
+                        <span class="session-type">Login</span>
+                    </div>
+                `).join('');
+            } else {
+                container.innerHTML = '<div class="empty-state">No login history found</div>';
+            }
+        });
+}
+
+function openEditBioModal() {
+    document.getElementById('editBioModal').style.display = 'block';
+    const bioText = document.getElementById('bioText');
+    const charCount = document.getElementById('bioCharCount');
+    charCount.textContent = bioText.value.length;
+    bioText.addEventListener('input', () => {
+        charCount.textContent = bioText.value.length;
+    });
+}
+
+function closeEditBioModal() {
+    document.getElementById('editBioModal').style.display = 'none';
+}
+
+document.getElementById('editBioBtn')?.addEventListener('click', openEditBioModal);
+document.getElementById('saveBioBtn')?.addEventListener('click', () => {
+    const bio = document.getElementById('bioText').value.trim();
+    const btn = document.getElementById('saveBioBtn');
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    
+    const formData = new FormData();
+    formData.append('bio', bio);
+    
+    fetch('/api/user/bio', {
+        method: 'POST',
+        body: formData
+    }).then(res => res.json()).then(data => {
+        if (data.success) {
+            toast.success('Bio updated');
+            const bioDisplay = document.getElementById('bioDisplay');
+            if (bio) {
+                bioDisplay.innerHTML = `<p>${escapeHtml(bio)}</p>`;
+            } else {
+                bioDisplay.innerHTML = '<p class="bio-empty">No bio set yet</p>';
+            }
+            closeEditBioModal();
+        } else {
+            toast.error(data.error);
+        }
+    }).finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Save Bio';
+    });
+});
+
+function openChangePasswordModal() {
+    document.getElementById('changePasswordModal').style.display = 'block';
+}
+
+function closeChangePasswordModal() {
+    document.getElementById('changePasswordModal').style.display = 'none';
+    document.getElementById('currentPassword').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('confirmPassword').value = '';
+}
+
+document.getElementById('changePasswordBtn')?.addEventListener('click', openChangePasswordModal);
+document.getElementById('submitPasswordChangeBtn')?.addEventListener('click', () => {
+    const current = document.getElementById('currentPassword').value;
+    const newPass = document.getElementById('newPassword').value;
+    const confirm = document.getElementById('confirmPassword').value;
+    
+    if (newPass !== confirm) {
+        toast.error('New passwords do not match');
+        return;
     }
     
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    const btn = document.getElementById('submitPasswordChangeBtn');
+    btn.disabled = true;
+    btn.textContent = 'Changing...';
+    
+    const formData = new FormData();
+    formData.append('current_password', current);
+    formData.append('new_password', newPass);
+    formData.append('confirm_password', confirm);
+    
+    fetch('/profile/change-password', {
+        method: 'POST',
+        body: formData
+    }).then(res => res.text()).then(html => {
+        if (html.includes('success')) {
+            toast.success('Password changed successfully');
+            closeChangePasswordModal();
+        } else if (html.includes('error')) {
+            toast.error('Failed to change password');
+        }
+    }).finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Change Password';
+    });
+});
+
+function openChangePinModal() {
+    document.getElementById('changePinModal').style.display = 'block';
+}
+
+function closeChangePinModal() {
+    document.getElementById('changePinModal').style.display = 'none';
+    document.getElementById('currentPin').value = '';
+    document.getElementById('newPin').value = '';
+    document.getElementById('confirmPin').value = '';
+}
+
+document.getElementById('changePinBtn')?.addEventListener('click', openChangePinModal);
+document.getElementById('submitPinChangeBtn')?.addEventListener('click', () => {
+    const current = document.getElementById('currentPin').value;
+    const newPin = document.getElementById('newPin').value;
+    const confirm = document.getElementById('confirmPin').value;
+    
+    if (newPin !== confirm) {
+        toast.error('New PINs do not match');
+        return;
     }
     
-    loadBlockedContacts();
+    if (!/^\d{6}$/.test(newPin)) {
+        toast.error('PIN must be exactly 6 digits');
+        return;
+    }
+    
+    const btn = document.getElementById('submitPinChangeBtn');
+    btn.disabled = true;
+    btn.textContent = 'Changing...';
+    
+    const formData = new FormData();
+    formData.append('current_pin', current);
+    formData.append('new_pin', newPin);
+    formData.append('confirm_pin', confirm);
+    
+    fetch('/profile/change-pin', {
+        method: 'POST',
+        body: formData
+    }).then(res => res.text()).then(html => {
+        if (html.includes('success')) {
+            toast.success('PIN changed successfully');
+            closeChangePinModal();
+        } else if (html.includes('error')) {
+            toast.error('Failed to change PIN');
+        }
+    }).finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Change PIN';
+    });
+});
+
+function openDeleteAccountModal() {
+    document.getElementById('deleteAccountModal').style.display = 'block';
+}
+
+function closeDeleteAccountModal() {
+    document.getElementById('deleteAccountModal').style.display = 'none';
+    document.getElementById('deletePassword').value = '';
+    document.getElementById('deleteConfirm').value = '';
+}
+
+document.getElementById('deleteAccountBtn')?.addEventListener('click', openDeleteAccountModal);
+document.getElementById('confirmDeleteBtn')?.addEventListener('click', () => {
+    const password = document.getElementById('deletePassword').value;
+    const confirm = document.getElementById('deleteConfirm').value;
+    
+    if (confirm !== 'DELETE') {
+        toast.error('Type DELETE to confirm');
+        return;
+    }
+    
+    const btn = document.getElementById('confirmDeleteBtn');
+    btn.disabled = true;
+    btn.textContent = 'Deleting...';
+    
+    const formData = new FormData();
+    formData.append('password', password);
+    formData.append('confirm', confirm);
+    
+    fetch('/profile/delete-account', {
+        method: 'POST',
+        body: formData
+    }).then(res => {
+        window.location.href = '/';
+    });
+});
+
+document.getElementById('upgradeNowBtn')?.addEventListener('click', () => {
+    window.location.href = '/roles/upgrade';
+});
+
+document.getElementById('confirmLogoutBtn')?.addEventListener('click', () => {
+    window.location.href = '/logout';
+});
+
+document.getElementById('cancelLogoutBtn')?.addEventListener('click', () => {
+    showSection('myaccount');
+});
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+loadFileStats();
 </script>
 {% endblock %}

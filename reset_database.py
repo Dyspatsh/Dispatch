@@ -8,12 +8,17 @@ Run with: python3 reset_database.py
 import os
 import sys
 from datetime import datetime
+from dotenv import load_dotenv
 
 # Add current directory to path
 sys.path.append('/home/dispatch/dyspatch')
+load_dotenv()
 
 from database import engine, Base
-from sqlalchemy import text, inspect
+from sqlalchemy import text
+
+# Use environment variable for upload directory
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/home/dispatch/dyspatch/uploads")
 
 def confirm_reset():
     """Ask for confirmation before resetting"""
@@ -64,19 +69,18 @@ def get_owner_credentials():
 
 def delete_uploaded_files():
     """Delete all uploaded files from the uploads directory"""
-    upload_dir = "/home/dispatch/dyspatch/uploads"
     deleted_count = 0
     
-    if os.path.exists(upload_dir):
-        for filename in os.listdir(upload_dir):
-            file_path = os.path.join(upload_dir, filename)
+    if os.path.exists(UPLOAD_DIR):
+        for filename in os.listdir(UPLOAD_DIR):
+            file_path = os.path.join(UPLOAD_DIR, filename)
             if os.path.isfile(file_path):
                 os.remove(file_path)
                 deleted_count += 1
         print(f"Deleted {deleted_count} uploaded files")
     else:
         print("Uploads directory not found, creating it...")
-        os.makedirs(upload_dir, exist_ok=True)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
     
     return deleted_count
 

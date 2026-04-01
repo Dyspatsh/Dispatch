@@ -6,29 +6,30 @@
 <div class="messages-container">
     <h1>Messages</h1>
     
+    <div class="search-section">
+        <div class="form-group">
+            <label for="searchUser">Search User</label>
+            <div class="search-wrapper">
+                <input type="text" id="searchUser" placeholder="Enter username to invite...">
+                <button id="inviteBtn" class="btn btn-primary">Invite</button>
+            </div>
+            <div id="searchResult" class="search-result"></div>
+        </div>
+    </div>
+    
     <div class="messages-tabs">
         <button class="tab-button active" data-tab="received">Received</button>
         <button class="tab-button" data-tab="sent">Sent</button>
         <button class="tab-button" data-tab="chats">Active Chats</button>
+        <button class="tab-button" data-tab="groups">Groups</button>
     </div>
     
     <div id="received-tab" class="tab-content active">
-        <div class="search-section">
-            <div class="form-group">
-                <label for="searchUser">Search User</label>
-                <div class="search-wrapper">
-                    <input type="text" id="searchUser" placeholder="Enter username to invite...">
-                    <button id="inviteBtn" class="btn btn-primary">Invite</button>
-                </div>
-                <div id="searchResult" class="search-result"></div>
-            </div>
-        </div>
-        
         <h2>Invitations Received</h2>
         {% if pending_invitations %}
             {% for invite in pending_invitations %}
             <div class="invitation-item">
-                <p><strong>{{ invite.user1.username if invite.user1_id != user.id else invite.user2.username }}</strong></p>
+                <p><strong>{{ invite.user1.username if invite.user1_id != user.id else invite.user2.username }}</strong> wants to chat with you</p>
                 <div class="invitation-actions">
                     <form method="post" action="/chat/invite/accept/{{ invite.id }}" style="display:inline;">
                         <button type="submit" class="btn btn-small btn-success">Accept</button>
@@ -36,14 +37,14 @@
                     <form method="post" action="/chat/invite/decline/{{ invite.id }}" style="display:inline;">
                         <button type="submit" class="btn btn-small btn-danger">Decline</button>
                     </form>
-                    <form method="post" action="/chat/block/{{ invite.user1_id if invite.user1_id != user.id else invite.user2_id }}" style="display:inline;">
-                        <button type="submit" class="btn btn-small btn-warning" onclick="return confirm('Block this user?')">Block</button>
-                    </form>
                 </div>
             </div>
             {% endfor %}
         {% else %}
-        <p class="empty-message">No pending invitations</p>
+        <div class="empty-state">
+            <div class="empty-state-title">No pending invitations</div>
+            <div class="empty-state-message">When someone invites you to chat, it will appear here.</div>
+        </div>
         {% endif %}
     </div>
     
@@ -59,7 +60,10 @@
             </div>
             {% endfor %}
         {% else %}
-        <p class="empty-message">No sent invitations</p>
+        <div class="empty-state">
+            <div class="empty-state-title">No sent invitations</div>
+            <div class="empty-state-message">Invitations you send will appear here.</div>
+        </div>
         {% endif %}
     </div>
     
@@ -85,8 +89,82 @@
             </div>
             {% endfor %}
         {% else %}
-        <p class="empty-message">No active chats</p>
+        <div class="empty-state">
+            <div class="empty-state-title">No active chats</div>
+            <div class="empty-state-message">When you accept an invitation, chats will appear here.</div>
+        </div>
         {% endif %}
+    </div>
+    
+    <div id="groups-tab" class="tab-content">
+        <div class="groups-tab-header">
+            <h2>Groups</h2>
+            <div class="groups-tab-buttons">
+                <button id="startGroupChatBtn" class="btn btn-secondary btn-small">Start Group Chat</button>
+                <button id="createGroupBtn" class="btn btn-primary btn-small">New Group</button>
+                <button id="showSentInvitesBtn" class="btn btn-secondary btn-small">List</button>
+            </div>
+        </div>
+        
+        <!-- Pending Group Invitations -->
+        <div class="pending-group-invites">
+            <h3>Pending Group Invitations</h3>
+            {% if pending_group_invites %}
+                {% for invite in pending_group_invites %}
+                <div class="group-invite-item">
+                    <p><strong>{{ invite.inviter.username }}</strong> invited you to <strong>{{ invite.group.name }}</strong></p>
+                    <div class="invitation-actions">
+                        <button class="btn btn-small btn-success accept-group-invite" data-invite-id="{{ invite.id }}">Accept</button>
+                        <button class="btn btn-small btn-danger decline-group-invite" data-invite-id="{{ invite.id }}">Decline</button>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+            <div class="empty-state-compact">No pending group invitations</div>
+            {% endif %}
+        </div>
+        
+        <!-- Sent Group Invitations (hidden by default) -->
+        <div id="sentGroupInvites" class="sent-group-invites" style="display: none;">
+            <div class="sent-invites-header">
+                <h3>Sent Group Invitations</h3>
+                <button id="backToGroupsBtn" class="btn btn-small btn-secondary">Back</button>
+            </div>
+            {% if sent_group_invites %}
+                {% for invite in sent_group_invites %}
+                <div class="group-invite-item">
+                    <p><strong>{{ invite.group.name }}</strong> invite to <strong>{{ invite.invited_user.username }}</strong></p>
+                    <button class="btn btn-small btn-danger cancel-group-invite" data-invite-id="{{ invite.id }}">Cancel</button>
+                </div>
+                {% endfor %}
+            {% else %}
+            <div class="empty-state-compact">No sent group invitations</div>
+            {% endif %}
+        </div>
+        
+        <!-- Create Group Modal -->
+        <div id="createGroupModal" class="modal" style="display: none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Create New Group</h3>
+                    <button class="modal-close" onclick="closeCreateModal()">[X]</button>
+                </div>
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="groupName">Group Name</label>
+                        <input type="text" id="groupName" placeholder="Enter group name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="groupDescription">Description (optional)</label>
+                        <textarea id="groupDescription" rows="3" placeholder="Describe what this group is for"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary" onclick="closeCreateModal()">Cancel</button>
+                    <button id="submitCreateBtn" class="btn-primary">Create Group</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -96,41 +174,55 @@
     margin: 0 auto;
     padding: 1rem;
 }
+
 .search-section {
     margin-bottom: 2rem;
     padding: 1.5rem;
-    background: rgba(90, 45, 140, 0.05);
-    border-radius: 12px;
+    background: var(--bg-glass);
+    border-radius: var(--radius-lg);
+    backdrop-filter: blur(var(--blur-amount));
 }
+
 .search-wrapper {
     display: flex;
     gap: 1rem;
 }
+
 .search-wrapper input {
     flex: 1;
     padding: 0.75rem;
-    border: 1px solid #ddd;
-    border-radius: 8px;
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
 }
+
 .search-result {
     margin-top: 0.75rem;
 }
+
 .search-user {
     padding: 0.75rem;
-    background: rgba(90, 45, 140, 0.08);
-    border-radius: 8px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
     margin-top: 0.5rem;
     cursor: pointer;
+    transition: all var(--transition-fast);
 }
+
 .search-user:hover {
-    background: rgba(90, 45, 140, 0.15);
+    background: var(--primary);
+    color: white;
 }
+
 .messages-tabs {
     display: flex;
     gap: 0.5rem;
     margin: 1.5rem 0 1rem 0;
-    border-bottom: 2px solid rgba(90, 45, 140, 0.2);
+    border-bottom: 2px solid var(--border-light);
+    flex-wrap: wrap;
 }
+
 .tab-button {
     padding: 0.75rem 1.5rem;
     background: none;
@@ -138,115 +230,279 @@
     cursor: pointer;
     font-size: 1rem;
     font-weight: 600;
-    color: #666;
+    color: var(--text-secondary);
+    transition: all var(--transition-fast);
 }
+
 .tab-button.active {
-    color: #5a2d8c;
-    border-bottom: 2px solid #5a2d8c;
+    color: var(--primary);
+    border-bottom: 2px solid var(--primary);
     margin-bottom: -2px;
 }
+
 .tab-content {
     display: none;
     padding: 1rem 0;
 }
+
 .tab-content.active {
     display: block;
 }
-.invitation-item {
-    background: rgba(90, 45, 140, 0.05);
+
+.invitation-item, .group-invite-item {
+    background: var(--bg-glass);
+    backdrop-filter: blur(var(--blur-amount));
     padding: 1rem;
     margin-bottom: 1rem;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-wrap: wrap;
 }
+
 .invitation-actions {
     display: flex;
     gap: 0.5rem;
 }
+
 .chat-item {
-    background: rgba(90, 45, 140, 0.05);
+    background: var(--bg-glass);
+    backdrop-filter: blur(var(--blur-amount));
     padding: 1rem;
     margin-bottom: 1rem;
-    border-radius: 8px;
-    transition: transform 0.2s ease;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
+    transition: all var(--transition-fast);
 }
+
 .chat-item:hover {
     transform: translateX(5px);
 }
+
 .chat-link {
     text-decoration: none;
     color: inherit;
     display: block;
 }
+
 .chat-item-info {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     margin-bottom: 0.5rem;
 }
+
 .online-dot-small {
     display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background-color: #2ecc71;
+    background-color: var(--success);
 }
+
 .unread-badge {
     display: inline-block;
-    background-color: #e74c3c;
+    background-color: var(--danger);
     color: white;
     font-size: 0.7rem;
     padding: 0.2rem 0.5rem;
     border-radius: 20px;
 }
+
 .chat-updated {
     font-size: 0.75rem;
-    color: #888;
+    color: var(--text-muted);
 }
-.empty-message {
+
+.groups-tab-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.groups-tab-header h2 {
+    margin: 0;
+}
+
+.groups-tab-buttons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.pending-group-invites, .sent-group-invites {
+    margin-bottom: 2rem;
+}
+
+.pending-group-invites h3, .sent-group-invites h3 {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+    color: var(--primary);
+}
+
+.sent-invites-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.sent-invites-header h3 {
+    margin: 0;
+}
+
+.empty-state {
     text-align: center;
-    padding: 2rem;
-    color: #888;
-    font-style: italic;
+    padding: 3rem 2rem;
+    background: var(--bg-glass);
+    border-radius: var(--radius-lg);
+    border: 1px dashed var(--border-light);
 }
+
+.empty-state-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--primary);
+}
+
+.empty-state-message {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+}
+
+.empty-state-compact {
+    text-align: center;
+    padding: 1rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+}
+
+.modal-content {
+    background: var(--bg-glass-solid);
+    backdrop-filter: blur(var(--blur-amount));
+    margin: 10% auto;
+    border-radius: var(--radius-lg);
+    width: 90%;
+    max-width: 450px;
+    border: 1px solid var(--border-light);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.modal-header h3 {
+    margin: 0;
+    color: var(--primary);
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.modal-body {
+    padding: 1.25rem;
+}
+
+.modal-footer {
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+}
+
+.btn-small {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.75rem;
+}
+
 @media (max-width: 768px) {
     .search-wrapper {
         flex-direction: column;
     }
-    .invitation-item {
+    
+    .invitation-item, .group-invite-item {
         flex-direction: column;
         gap: 1rem;
         text-align: center;
     }
+    
     .tab-button {
         padding: 0.5rem 1rem;
         font-size: 0.9rem;
+    }
+    
+    .groups-tab-header {
+        flex-direction: column;
+        align-items: flex-start;
     }
 }
 </style>
 
 <script>
-    const tabButtons = document.querySelectorAll('.tab-button');
-    const tabContents = document.querySelectorAll('.tab-content');
-    
-    tabButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            const tabId = button.dataset.tab;
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            tabContents.forEach(content => content.classList.remove('active'));
-            button.classList.add('active');
-            document.getElementById(tabId + '-tab').classList.add('active');
-        });
+// Tab switching
+const tabButtons = document.querySelectorAll('.tab-button');
+const tabContents = document.querySelectorAll('.tab-content');
+
+tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+        const tabId = button.dataset.tab;
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        tabContents.forEach(content => content.classList.remove('active'));
+        button.classList.add('active');
+        const activeTab = document.getElementById(tabId + '-tab');
+        if (activeTab) activeTab.classList.add('active');
     });
-    
-    const searchInput = document.getElementById('searchUser');
-    const inviteBtn = document.getElementById('inviteBtn');
-    const searchResult = document.getElementById('searchResult');
-    let debounceTimer;
-    
+});
+
+// Search and Invite functionality
+const searchInput = document.getElementById('searchUser');
+const inviteBtn = document.getElementById('inviteBtn');
+const searchResult = document.getElementById('searchResult');
+let debounceTimer;
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function selectUser(username) {
+    searchInput.value = username;
+    searchResult.innerHTML = '';
+    if (inviteBtn) {
+        inviteBtn.click();
+    }
+}
+
+if (searchInput) {
     searchInput.addEventListener('input', () => {
         clearTimeout(debounceTimer);
         const query = searchInput.value.trim();
@@ -265,30 +521,34 @@
                     } else {
                         searchResult.innerHTML = '<div class="search-no-result">User not found</div>';
                     }
+                })
+                .catch(error => {
+                    console.error('Search error:', error);
+                    searchResult.innerHTML = '<div class="search-error">Search failed</div>';
                 });
         }, 300);
     });
-    
-    function selectUser(username) {
-        searchInput.value = username;
-        searchResult.innerHTML = '';
-    }
-    
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
+}
+
+if (inviteBtn) {
     inviteBtn.addEventListener('click', () => {
         const username = searchInput.value.trim();
         if (!username) {
-            alert('Please enter a username');
+            if (window.toast) {
+                window.toast.warning('Please enter a username');
+            } else {
+                alert('Please enter a username');
+            }
             return;
         }
+        
+        inviteBtn.disabled = true;
+        const originalText = inviteBtn.textContent;
+        inviteBtn.textContent = 'Sending...';
+        
         const formData = new FormData();
         formData.append('username', username);
+        
         fetch('/chat/invite', {
             method: 'POST',
             body: formData
@@ -296,12 +556,178 @@
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                alert(data.message);
-                location.reload();
+                if (window.toast) {
+                    window.toast.success(data.message || 'Invitation sent successfully');
+                } else {
+                    alert(data.message || 'Invitation sent successfully');
+                }
+                searchInput.value = '';
+                searchResult.innerHTML = '';
+                setTimeout(() => {
+                    location.reload();
+                }, 1000);
             } else {
-                alert('Error: ' + data.error);
+                const errorMsg = data.error || 'Failed to send invitation';
+                if (window.toast) {
+                    window.toast.error(errorMsg);
+                } else {
+                    alert('Error: ' + errorMsg);
+                }
             }
+        })
+        .catch(error => {
+            console.error('Invite error:', error);
+            if (window.toast) {
+                window.toast.error('Network error: ' + error.message);
+            } else {
+                alert('Network error: ' + error.message);
+            }
+        })
+        .finally(() => {
+            inviteBtn.disabled = false;
+            inviteBtn.textContent = originalText;
         });
     });
+}
+
+// Group Invitations
+document.querySelectorAll('.accept-group-invite').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const inviteId = btn.dataset.inviteId;
+        fetch(`/chat/group/invite/accept/${inviteId}`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    toast.success('Joined group');
+                    window.location.href = '/chat/groups';
+                } else {
+                    toast.error(data.error || 'Failed to accept invitation');
+                }
+            });
+    });
+});
+
+document.querySelectorAll('.decline-group-invite').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const inviteId = btn.dataset.inviteId;
+        fetch(`/chat/group/invite/decline/${inviteId}`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    toast.success('Invitation declined');
+                    btn.closest('.group-invite-item').remove();
+                } else {
+                    toast.error(data.error || 'Failed to decline invitation');
+                }
+            });
+    });
+});
+
+document.querySelectorAll('.cancel-group-invite').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const inviteId = btn.dataset.inviteId;
+        fetch(`/chat/group/invite/cancel/${inviteId}`, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    toast.success('Invitation cancelled');
+                    btn.closest('.group-invite-item').remove();
+                } else {
+                    toast.error(data.error || 'Failed to cancel invitation');
+                }
+            });
+    });
+});
+
+// Groups tab buttons
+const startGroupChatBtn = document.getElementById('startGroupChatBtn');
+const createGroupBtn = document.getElementById('createGroupBtn');
+const showSentInvitesBtn = document.getElementById('showSentInvitesBtn');
+const backToGroupsBtn = document.getElementById('backToGroupsBtn');
+const sentGroupInvites = document.getElementById('sentGroupInvites');
+const pendingInvites = document.querySelector('.pending-group-invites');
+
+if (startGroupChatBtn) {
+    startGroupChatBtn.addEventListener('click', () => {
+        window.location.href = '/chat/groups';
+    });
+}
+
+if (createGroupBtn) {
+    createGroupBtn.addEventListener('click', () => {
+        document.getElementById('createGroupModal').style.display = 'block';
+    });
+}
+
+if (showSentInvitesBtn) {
+    showSentInvitesBtn.addEventListener('click', () => {
+        if (sentGroupInvites) {
+            sentGroupInvites.style.display = 'block';
+            if (pendingInvites) pendingInvites.style.display = 'none';
+            showSentInvitesBtn.style.display = 'none';
+        }
+    });
+}
+
+if (backToGroupsBtn) {
+    backToGroupsBtn.addEventListener('click', () => {
+        if (sentGroupInvites) sentGroupInvites.style.display = 'none';
+        if (pendingInvites) pendingInvites.style.display = 'block';
+        if (showSentInvitesBtn) showSentInvitesBtn.style.display = 'inline-block';
+    });
+}
+
+function closeCreateModal() {
+    document.getElementById('createGroupModal').style.display = 'none';
+    document.getElementById('groupName').value = '';
+    document.getElementById('groupDescription').value = '';
+}
+
+document.getElementById('submitCreateBtn')?.addEventListener('click', () => {
+    const name = document.getElementById('groupName').value.trim();
+    const description = document.getElementById('groupDescription').value.trim();
+    
+    if (!name) {
+        toast.warning('Please enter a group name');
+        return;
+    }
+    
+    if (name.length < 3) {
+        toast.warning('Group name must be at least 3 characters');
+        return;
+    }
+    
+    const btn = document.getElementById('submitCreateBtn');
+    btn.disabled = true;
+    btn.textContent = 'Creating...';
+    
+    const formData = new FormData();
+    formData.append('name', name);
+    if (description) formData.append('description', description);
+    
+    fetch('/chat/group/create', {
+        method: 'POST',
+        body: formData
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            toast.success('Group "' + data.name + '" created successfully');
+            closeCreateModal();
+            setTimeout(() => {
+                window.location.href = '/chat/groups';
+            }, 1000);
+        } else {
+            toast.error(data.error || 'Failed to create group');
+        }
+    })
+    .catch(error => {
+        toast.error('Network error: ' + error.message);
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.textContent = 'Create Group';
+    });
+});
 </script>
 {% endblock %}

@@ -1,598 +1,20 @@
-{% extends "base.html" %}
-
-{% block title %}Send Files{% endblock %}
-
-{% block content %}
-<div class="send-container">
-    <h1>Send Files</h1>
-    
-    <form id="sendForm">
-        <div class="form-group">
-            <label for="recipient">Recipient Username</label>
-            <input type="text" id="recipient" name="recipient" required placeholder="Enter username to send files to">
-            <small>Files will be sent to this user. They must accept before you can download.</small>
-        </div>
-        
-        <!-- Drop Zone -->
-        <div class="drop-zone" id="dropZone">
-            <div class="drop-zone-content">
-                <div class="drop-zone-icon">[ + ]</div>
-                <p>Drag and Drop Files Here</p>
-                <p class="drop-zone-subtext">or click to browse</p>
-                <input type="file" id="fileInput" multiple style="display: none;">
-            </div>
-        </div>
-        
-        <!-- Upload Queue -->
-        <div class="upload-queue" id="uploadQueue" style="display: none;">
-            <div class="queue-header">
-                <h3>Upload Queue</h3>
-                <div class="queue-stats" id="queueStats">
-                    <span>0 files</span>
-                    <span>0 MB total</span>
-                </div>
-            </div>
-            <div class="queue-items" id="queueItems">
-                <!-- Files will be added here dynamically -->
-            </div>
-            <div class="queue-actions">
-                <button type="button" id="removeAllBtn" class="btn btn-secondary btn-small">Remove All</button>
-                <button type="button" id="clearCompletedBtn" class="btn btn-secondary btn-small">Clear Completed</button>
-                <button type="button" id="sendAllBtn" class="btn btn-primary">Send All</button>
-            </div>
-        </div>
-        
-        <!-- Upload Progress Container (shows during upload) -->
-        <div class="upload-progress-container" id="uploadProgressContainer" style="display: none;">
-            <div class="upload-overall-progress">
-                <div class="progress-label">Overall Progress</div>
-                <div class="progress-bar-wrapper">
-                    <div class="progress-bar" id="overallProgressBar" style="width: 0%;"></div>
-                </div>
-                <div class="progress-stats">
-                    <span id="completedFiles">0</span> / <span id="totalFiles">0</span> files completed
-                </div>
-            </div>
-        </div>
-        
-        <div class="role-limits-info">
-            <h3>Your Limits</h3>
-            <div class="limits-grid">
-                <div class="limit-item">
-                    <span class="limit-label">Max File Size:</span>
-                    <span class="limit-value" id="maxFileSizeLabel">
-                        {% if user.role == 'user' %}1 GB
-                        {% elif user.role == 'pro' %}5 GB
-                        {% elif user.role == 'premium' %}10 GB
-                        {% else %}Unlimited{% endif %}
-                    </span>
-                </div>
-                <div class="limit-item">
-                    <span class="limit-label">Max Files at Once:</span>
-                    <span class="limit-value" id="maxFilesLabel">
-                        {% if user.role == 'user' %}10
-                        {% elif user.role == 'pro' %}20
-                        {% elif user.role == 'premium' %}30
-                        {% else %}Unlimited{% endif %}
-                    </span>
-                </div>
-                <div class="limit-item">
-                    <span class="limit-label">Your Role:</span>
-                    <span class="limit-value role-badge">{{ user.role|capitalize }}</span>
-                </div>
-            </div>
-        </div>
-    </form>
-</div>
-
-<style>
-.send-container {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 1rem;
-}
-
-.drop-zone {
-    border: 3px dashed var(--border-medium);
-    border-radius: var(--radius-lg);
-    background: var(--bg-tertiary);
-    padding: 3rem 2rem;
-    text-align: center;
-    cursor: pointer;
-    transition: all var(--transition-base);
-    margin: 1.5rem 0;
-}
-
-.drop-zone.drag-over {
-    border-color: var(--primary);
-    background: var(--bg-glass);
-    transform: scale(1.01);
-}
-
-.drop-zone-icon {
-    font-size: 3rem;
-    font-weight: 300;
-    margin-bottom: 1rem;
-    opacity: 0.6;
-}
-
-.drop-zone-content p {
-    margin: 0.5rem 0;
-    color: var(--text-secondary);
-}
-
-.drop-zone-subtext {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-}
-
-.upload-queue {
-    background: var(--bg-glass);
-    backdrop-filter: blur(var(--blur-amount));
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light);
-    margin: 1.5rem 0;
-    overflow: hidden;
-}
-
-.queue-header {
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border-light);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 1rem;
-}
-
-.queue-header h3 {
-    margin: 0;
-    font-size: 1.1rem;
-}
-
-.queue-stats {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    display: flex;
-    gap: 1rem;
-}
-
-.queue-items {
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.queue-item {
-    padding: 1rem 1.5rem;
-    border-bottom: 1px solid var(--border-light);
-    transition: background var(--transition-fast);
-}
-
-.queue-item:hover {
-    background: var(--bg-tertiary);
-}
-
-.queue-item-header {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 0.75rem;
-}
-
-.file-preview {
-    width: 48px;
-    height: 48px;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5rem;
-    font-weight: 300;
-    flex-shrink: 0;
-    overflow: hidden;
-}
-
-.file-preview img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-}
-
-.file-info {
-    flex: 1;
-}
-
-.file-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-    word-break: break-all;
-}
-
-.file-size {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    margin-top: 0.25rem;
-}
-
-.file-status {
-    font-size: 0.75rem;
-    font-weight: 500;
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--radius-sm);
-}
-
-.file-status.pending {
-    background: var(--warning);
-    color: white;
-}
-
-.file-status.uploading {
-    background: var(--primary);
-    color: white;
-}
-
-.file-status.completed {
-    background: var(--success);
-    color: white;
-}
-
-.file-status.failed {
-    background: var(--danger);
-    color: white;
-}
-
-.cancel-btn, .retry-btn {
-    padding: 0.25rem 0.75rem;
-    font-size: 0.75rem;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-light);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.cancel-btn:hover {
-    background: var(--danger);
-    color: white;
-    border-color: var(--danger);
-}
-
-.retry-btn:hover {
-    background: var(--primary);
-    color: white;
-    border-color: var(--primary);
-}
-
-.progress-wrapper {
-    margin-top: 0.75rem;
-}
-
-.progress-bar-wrapper {
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    height: 6px;
-    overflow: hidden;
-}
-
-.progress-bar {
-    background: var(--gradient-primary);
-    height: 100%;
-    width: 0%;
-    transition: width 0.3s ease;
-    border-radius: var(--radius-sm);
-}
-
-.progress-stats {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 0.5rem;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-}
-
-.queue-actions {
-    padding: 1rem 1.5rem;
-    border-top: 1px solid var(--border-light);
-    display: flex;
-    gap: 1rem;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-}
-
-.upload-progress-container {
-    background: var(--bg-glass);
-    backdrop-filter: blur(var(--blur-amount));
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light);
-    padding: 1.5rem;
-    margin: 1.5rem 0;
-}
-
-.upload-overall-progress {
-    text-align: center;
-}
-
-.progress-label {
-    font-size: 0.875rem;
-    margin-bottom: 0.5rem;
-    color: var(--text-secondary);
-}
-
-.role-limits-info {
-    margin-top: 2rem;
-    padding: 1.5rem;
-    background: var(--bg-glass);
-    backdrop-filter: blur(var(--blur-amount));
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light);
-}
-
-.role-limits-info h3 {
-    margin-bottom: 1rem;
-    font-size: 1rem;
-}
-
-.limits-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-}
-
-.limit-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.5rem;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-}
-
-.limit-label {
-    font-size: 0.875rem;
-    color: var(--text-muted);
-}
-
-.limit-value {
-    font-weight: 600;
-    font-size: 0.875rem;
-}
-
-.role-badge {
-    background: var(--gradient-primary);
-    padding: 0.25rem 0.6rem;
-    border-radius: var(--radius-sm);
-    color: white;
-}
-
-/* Username Validation Styles */
-.validation-message {
-    font-size: 0.75rem;
-    margin-top: 0.25rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: var(--radius-sm);
-}
-
-.validation-success {
-    color: var(--success);
-    background: rgba(46, 213, 115, 0.1);
-}
-
-.validation-error {
-    color: var(--danger);
-    background: rgba(255, 71, 87, 0.1);
-}
-
-.validation-loading {
-    color: var(--primary);
-    background: rgba(102, 126, 234, 0.1);
-}
-
-#recipient.error {
-    border-color: var(--danger);
-}
-
-#recipient.success {
-    border-color: var(--success);
-}
-
-@media (max-width: 768px) {
-    .queue-item-header {
-        flex-wrap: wrap;
-    }
-    
-    .queue-actions {
-        justify-content: center;
-    }
-    
-    .limits-grid {
-        grid-template-columns: 1fr;
-    }
-}
-</style>
-
-<script>
-// User limits from backend
-const userRole = "{{ user.role }}";
-const maxFiles = {
-    'user': 10,
-    'pro': 20,
-    'premium': 30,
-    'owner': 100
-}[userRole] || 10;
-
-const maxFileSizeBytes = {
-    'user': 1073741824,
-    'pro': 5368709120,
-    'premium': 10737418240,
-    'owner': Infinity
-}[userRole] || 1073741824;
-
-// Username Validation Class
-class UsernameValidator {
-    constructor() {
-        this.debounceTimer = null;
-        this.isValid = false;
-        this.validatedUsername = null;
-        this.setupValidation();
-    }
-    
-    setupValidation() {
-        const recipientInput = document.getElementById('recipient');
-        
-        recipientInput.addEventListener('input', (e) => {
-            const username = e.target.value.trim();
-            
-            if (this.debounceTimer) {
-                clearTimeout(this.debounceTimer);
-            }
-            
-            this.removeValidationMessage();
-            
-            if (username.length < 2) {
-                this.isValid = false;
-                this.validatedUsername = null;
-                recipientInput.classList.remove('error', 'success');
-                return;
-            }
-            
-            this.debounceTimer = setTimeout(() => {
-                this.validateUsername(username);
-            }, 500);
-        });
-    }
-    
-    async validateUsername(username) {
-        const recipientInput = document.getElementById('recipient');
-        
-        try {
-            this.showValidationMessage('Checking username...', 'loading');
-            
-            const currentUser = "{{ user.username }}";
-            if (username.toLowerCase() === currentUser.toLowerCase()) {
-                this.showValidationMessage('You cannot send files to yourself', 'error');
-                recipientInput.classList.add('error');
-                recipientInput.classList.remove('success');
-                this.isValid = false;
-                this.validatedUsername = null;
-                return false;
-            }
-            
-            const response = await fetch(`/search?q=${encodeURIComponent(username)}`);
-            const data = await response.json();
-            
-            if (data.users && data.users.length > 0) {
-                const exactMatch = data.users.find(u => 
-                    u.username.toLowerCase() === username.toLowerCase()
-                );
-                
-                if (exactMatch) {
-                    recipientInput.value = exactMatch.username;
-                    this.showValidationMessage(`User found: ${exactMatch.username}`, 'success');
-                    recipientInput.classList.remove('error');
-                    recipientInput.classList.add('success');
-                    this.isValid = true;
-                    this.validatedUsername = exactMatch.username;
-                    return true;
-                } else {
-                    this.showValidationMessage('Username not found', 'error');
-                    recipientInput.classList.add('error');
-                    recipientInput.classList.remove('success');
-                    this.isValid = false;
-                    this.validatedUsername = null;
-                    return false;
-                }
-            } else {
-                this.showValidationMessage('Username not found', 'error');
-                recipientInput.classList.add('error');
-                recipientInput.classList.remove('success');
-                this.isValid = false;
-                this.validatedUsername = null;
-                return false;
-            }
-        } catch (error) {
-            this.showValidationMessage('Could not validate username', 'error');
-            recipientInput.classList.add('error');
-            recipientInput.classList.remove('success');
-            this.isValid = false;
-            this.validatedUsername = null;
-            return false;
-        }
-    }
-    
-    showValidationMessage(message, type) {
-        this.removeValidationMessage();
-        
-        const recipientGroup = document.querySelector('#recipient').parentElement;
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `validation-message validation-${type}`;
-        messageDiv.textContent = message;
-        recipientGroup.appendChild(messageDiv);
-        
-        if (type !== 'loading') {
-            setTimeout(() => {
-                if (messageDiv.parentNode) {
-                    messageDiv.remove();
-                }
-            }, 3000);
-        }
-    }
-    
-    removeValidationMessage() {
-        const existingMessage = document.querySelector('.validation-message');
-        if (existingMessage) {
-            existingMessage.remove();
-        }
-    }
-    
-    isValidUsername() {
-        return this.isValid;
-    }
-    
-    getValidatedUsername() {
-        return this.validatedUsername;
-    }
-}
-
-// Upload queue management
-class UploadQueue {
-    constructor(validator) {
-        this.files = [];
-        this.currentIndex = 0;
-        this.isUploading = false;
-        this.completedCount = 0;
-        this.failedCount = 0;
-        this.validator = validator;
-        this.init();
-    }
-    
-    init() {
-        this.dropZone = document.getElementById('dropZone');
-        this.fileInput = document.getElementById('fileInput');
-        this.queueContainer = document.getElementById('uploadQueue');
-        this.queueItems = document.getElementById('queueItems');
-        this.queueStats = document.getElementById('queueStats');
-        this.sendAllBtn = document.getElementById('sendAllBtn');
-        this.removeAllBtn = document.getElementById('removeAllBtn');
-        this.clearCompletedBtn = document.getElementById('clearCompletedBtn');
-        this.progressContainer = document.getElementById('uploadProgressContainer');
-        this.overallProgressBar = document.getElementById('overallProgressBar');
-        this.completedFilesSpan = document.getElementById('completedFiles');
-        this.totalFilesSpan = document.getElementById('totalFiles');
         
         this.setupEventListeners();
     }
     
     setupEventListeners() {
+        // Click to browse
         this.dropZone.addEventListener('click', () => {
             this.fileInput.click();
         });
         
+        // File input change
         this.fileInput.addEventListener('change', (e) => {
             this.addFiles(Array.from(e.target.files));
             this.fileInput.value = '';
         });
         
+        // Drag and drop
         this.dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             this.dropZone.classList.add('drag-over');
@@ -608,24 +30,28 @@ class UploadQueue {
             this.addFiles(Array.from(e.dataTransfer.files));
         });
         
+        // Buttons
         this.sendAllBtn.addEventListener('click', () => this.startUpload());
         this.removeAllBtn.addEventListener('click', () => this.removeAll());
         this.clearCompletedBtn.addEventListener('click', () => this.clearCompleted());
     }
     
     addFiles(newFiles) {
+        // Check file count limit
         if (this.files.length + newFiles.length > maxFiles) {
             toast.warning(`You can only upload ${maxFiles} files at once`);
             return;
         }
         
         for (const file of newFiles) {
+            // Check file size limit
             if (file.size > maxFileSizeBytes) {
                 const maxSizeGB = maxFileSizeBytes / 1073741824;
                 toast.error(`${file.name} exceeds ${maxSizeGB}GB limit`);
                 continue;
             }
             
+            // Check for duplicate filenames
             if (this.files.some(f => f.file.name === file.name)) {
                 toast.warning(`${file.name} already in queue`);
                 continue;
@@ -651,6 +77,7 @@ class UploadQueue {
         const fileType = file.type;
         const extension = file.name.split('.').pop().toLowerCase();
         
+        // Image preview
         if (fileType.startsWith('image/')) {
             return new Promise((resolve) => {
                 const reader = new FileReader();
@@ -661,26 +88,32 @@ class UploadQueue {
             });
         }
         
+        // Video preview
         if (fileType.startsWith('video/')) {
             return `<div style="font-size: 1.5rem; font-weight: 300;">[Video]</div>`;
         }
         
+        // PDF preview
         if (fileType === 'application/pdf' || extension === 'pdf') {
             return `<div style="font-size: 1.5rem; font-weight: 300;">[PDF]</div>`;
         }
         
+        // Document preview
         if (['doc', 'docx', 'txt', 'rtf'].includes(extension)) {
-            return `<div style="font-size: 1.5rem; font-weight: 300;">[Document]</div>`;
+            return `<div style="font-size: 1.5rem; font-weight: 300;">[Doc]</div>`;
         }
         
+        // Archive preview
         if (['zip', 'rar', '7z', 'tar', 'gz'].includes(extension)) {
             return `<div style="font-size: 1.5rem; font-weight: 300;">[Archive]</div>`;
         }
         
+        // Audio preview
         if (fileType.startsWith('audio/')) {
             return `<div style="font-size: 1.5rem; font-weight: 300;">[Audio]</div>`;
         }
         
+        // Default file icon
         return `<div style="font-size: 1.5rem; font-weight: 300;">[File]</div>`;
     }
     
@@ -766,6 +199,7 @@ class UploadQueue {
         
         this.queueItems.innerHTML = html;
         
+        // Attach event listeners
         document.querySelectorAll('.cancel-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 const index = parseInt(btn.dataset.index);
@@ -784,6 +218,8 @@ class UploadQueue {
     updateStats() {
         const totalSize = this.files.reduce((sum, item) => sum + item.file.size, 0);
         const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(1);
+        const pendingCount = this.files.filter(f => f.status === 'pending').length;
+        const uploadingCount = this.files.filter(f => f.status === 'uploading').length;
         const completedCount = this.files.filter(f => f.status === 'completed').length;
         const failedCount = this.files.filter(f => f.status === 'failed').length;
         
@@ -817,12 +253,11 @@ class UploadQueue {
             return;
         }
         
-        if (!this.validator.isValidUsername()) {
-            toast.error('Please enter a valid recipient username');
+        const recipient = document.getElementById('recipient').value.trim();
+        if (!recipient) {
+            toast.error('Please enter a recipient username');
             return;
         }
-        
-        const recipient = this.validator.getValidatedUsername();
         
         const pendingFiles = this.files.filter(f => f.status === 'pending' || f.status === 'failed');
         if (pendingFiles.length === 0) {
@@ -835,6 +270,7 @@ class UploadQueue {
         this.failedCount = 0;
         this.showOverallProgress();
         
+        // Reset failed files to pending for retry
         this.files.forEach(f => {
             if (f.status === 'failed') {
                 f.status = 'pending';
@@ -888,6 +324,7 @@ class UploadQueue {
             formData.append('options', JSON.stringify({}));
             formData.append('encryption_key', 'placeholder');
             
+            // Encrypt file locally
             this.encryptFile(item.file).then(encryptedBlob => {
                 formData.append('encrypted_file', encryptedBlob, 'encrypted.bin');
                 
@@ -1052,8 +489,7 @@ class UploadQueue {
     }
 }
 
-// Initialize username validator and upload queue
-const usernameValidator = new UsernameValidator();
-const uploadQueue = new UploadQueue(usernameValidator);
+// Initialize upload queue
+const uploadQueue = new UploadQueue();
 </script>
 {% endblock %}

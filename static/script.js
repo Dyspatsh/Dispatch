@@ -1,4 +1,8 @@
-// Toast notification system
+// ============================================
+// DISPATCH - Modern UI Enhancements
+// ============================================
+
+// Toast Notification System
 class ToastManager {
     constructor() {
         this.container = null;
@@ -19,8 +23,9 @@ class ToastManager {
     show(message, type = 'info', duration = 5000) {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
+        
         toast.innerHTML = `
-            <div class="toast-message">${escapeHtml(message)}</div>
+            <div class="toast-message">${this.escapeHtml(message)}</div>
             <button class="toast-close">&times;</button>
         `;
 
@@ -34,10 +39,12 @@ class ToastManager {
         setTimeout(() => {
             this.removeToast(toast);
         }, duration);
+        
+        toast.style.animation = 'slideInRight 0.3s ease';
     }
 
     removeToast(toast) {
-        toast.classList.add('fade-out');
+        toast.style.animation = 'fadeOut 0.3s ease forwards';
         setTimeout(() => {
             if (toast.parentNode) {
                 toast.remove();
@@ -60,65 +67,138 @@ class ToastManager {
     warning(message, duration = 5000) {
         this.show(message, 'warning', duration);
     }
-}
 
-const toast = new ToastManager();
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-// Loading spinner
-function showLoading(element) {
-    const originalContent = element.innerHTML;
-    const spinner = '<span class="spinner"></span>';
-    element.innerHTML = spinner;
-    element.disabled = true;
-    element.setAttribute('data-original', originalContent);
-    return () => {
-        element.innerHTML = element.getAttribute('data-original');
-        element.disabled = false;
-        element.removeAttribute('data-original');
-    };
-}
-
-// Skeleton loader
-function showSkeleton(element, type = 'card') {
-    if (type === 'card') {
-        element.innerHTML = `
-            <div class="skeleton-card">
-                <div class="skeleton-title skeleton"></div>
-                <div class="skeleton-text skeleton"></div>
-                <div class="skeleton-text skeleton"></div>
-            </div>
-        `;
-    } else if (type === 'list') {
-        element.innerHTML = `
-            <div class="skeleton-card">
-                <div class="skeleton-text skeleton"></div>
-                <div class="skeleton-text skeleton" style="width: 80%;"></div>
-            </div>
-            <div class="skeleton-card">
-                <div class="skeleton-text skeleton"></div>
-                <div class="skeleton-text skeleton" style="width: 80%;"></div>
-            </div>
-        `;
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 }
 
-// Format file size
-function formatFileSize(bytes) {
-    if (bytes === 0) return '0 B';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+// Initialize toast
+const toast = new ToastManager();
+
+// Theme Manager
+class ThemeManager {
+    constructor() {
+        this.theme = localStorage.getItem('theme') || 'light';
+        this.init();
+    }
+
+    init() {
+        this.applyTheme(this.theme);
+        this.setupToggle();
+    }
+
+    applyTheme(theme) {
+        document.body.className = theme;
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+        
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) {
+            toggle.checked = theme === 'dark';
+        }
+        
+        window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme } }));
+    }
+
+    toggle() {
+        const newTheme = this.theme === 'light' ? 'dark' : 'light';
+        this.theme = newTheme;
+        this.applyTheme(newTheme);
+        
+        fetch('/profile/change-theme', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'theme=' + newTheme
+        }).catch(err => console.error('Theme sync failed:', err));
+    }
+
+    setupToggle() {
+        const toggle = document.getElementById('themeToggle');
+        if (toggle) {
+            toggle.addEventListener('change', () => this.toggle());
+        }
+    }
 }
 
-// Format expiry time
+// Initialize theme manager
+const themeManager = new ThemeManager();
+
+// Loading Spinner Manager
+class LoadingManager {
+    static show(element) {
+        if (!element) return null;
+        
+        const originalContent = element.innerHTML;
+        const originalWidth = element.style.width;
+        
+        element.style.width = element.offsetWidth + 'px';
+        element.innerHTML = '<span class="spinner" style="width: 20px; height: 20px;"></span>';
+        element.disabled = true;
+        element.setAttribute('data-original', originalContent);
+        element.setAttribute('data-original-width', originalWidth);
+        
+        return () => {
+            element.innerHTML = element.getAttribute('data-original');
+            element.disabled = false;
+            element.style.width = element.getAttribute('data-original-width');
+            element.removeAttribute('data-original');
+            element.removeAttribute('data-original-width');
+        };
+    }
+}
+
+// Skeleton Loader
+class SkeletonLoader {
+    static show(element, type = 'card') {
+        if (!element) return;
+        
+        const skeletons = {
+            card: `
+                <div class="skeleton-card">
+                    <div class="skeleton-title skeleton"></div>
+                    <div class="skeleton-text skeleton"></div>
+                    <div class="skeleton-text skeleton" style="width: 80%;"></div>
+                </div>
+            `,
+            list: `
+                <div class="skeleton-list">
+                    <div class="skeleton-text skeleton"></div>
+                    <div class="skeleton-text skeleton" style="width: 90%;"></div>
+                    <div class="skeleton-text skeleton" style="width: 85%;"></div>
+                </div>
+            `,
+            chat: `
+                <div class="skeleton-message">
+                    <div class="skeleton-text skeleton" style="width: 60%;"></div>
+                </div>
+                <div class="skeleton-message" style="margin-left: auto;">
+                    <div class="skeleton-text skeleton" style="width: 40%;"></div>
+                </div>
+            `
+        };
+        
+        element.innerHTML = skeletons[type] || skeletons.card;
+    }
+    
+    static hide(element, content) {
+        if (!element) return;
+        element.innerHTML = content || '';
+    }
+}
+
+// Utility Functions
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const k = 1024;
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i];
+}
+
 function formatExpiryTime(expiresAt) {
     const expiryTime = new Date(expiresAt);
     const now = new Date();
@@ -126,34 +206,49 @@ function formatExpiryTime(expiresAt) {
 
     if (diff <= 0) return 'Expired';
 
-    const hours = Math.floor(diff / 3600000);
-    const minutes = Math.floor((diff % 3600000) / 60000);
-    const seconds = Math.floor((diff % 60000) / 1000);
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
 
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    if (minutes > 0) return `${minutes}m ${seconds}s`;
-    return `${seconds}s`;
+    if (days > 0) return days + 'd ' + hours + 'h';
+    if (hours > 0) return hours + 'h ' + minutes + 'm';
+    return minutes + 'm';
 }
 
-// Theme handling
-document.addEventListener('DOMContentLoaded', function() {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme) {
-        document.body.className = savedTheme;
-    }
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        toast.success('Copied to clipboard');
+    }).catch(() => {
+        toast.error('Failed to copy');
+    });
+}
 
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Mobile Menu Handler
+document.addEventListener('DOMContentLoaded', function() {
     const burgerMenu = document.getElementById('burgerMenu');
     const sidebarMenu = document.getElementById('sidebarMenu');
     const sidebarOverlay = document.getElementById('sidebarOverlay');
 
     if (burgerMenu && sidebarMenu && sidebarOverlay) {
-        burgerMenu.addEventListener('click', function() {
+        burgerMenu.addEventListener('click', () => {
             sidebarMenu.classList.add('open');
             sidebarOverlay.classList.add('active');
             document.body.style.overflow = 'hidden';
         });
 
-        sidebarOverlay.addEventListener('click', function() {
+        sidebarOverlay.addEventListener('click', () => {
             sidebarMenu.classList.remove('open');
             sidebarOverlay.classList.remove('active');
             document.body.style.overflow = '';
@@ -161,25 +256,55 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const sidebarLinks = sidebarMenu.querySelectorAll('a');
         sidebarLinks.forEach(link => {
-            link.addEventListener('click', function() {
+            link.addEventListener('click', () => {
                 sidebarMenu.classList.remove('open');
                 sidebarOverlay.classList.remove('active');
                 document.body.style.overflow = '';
             });
         });
     }
+    
+    // Add smooth scroll to all anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function(e) {
+            const href = this.getAttribute('href');
+            if (href !== '#' && href !== '') {
+                const target = document.querySelector(href);
+                if (target) {
+                    e.preventDefault();
+                    target.scrollIntoView({ behavior: 'smooth' });
+                }
+            }
+        });
+    });
+    
+    // Add animation on scroll
+    const observerOptions = {
+        threshold: 0.1,
+        rootMargin: '0px 0px -50px 0px'
+    };
+    
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.animation = 'fadeInUp 0.6s ease forwards';
+                observer.unobserve(entry.target);
+            }
+        });
+    }, observerOptions);
+    
+    document.querySelectorAll('.feature, .stat-card, .user-card, .file-card').forEach(el => {
+        el.style.opacity = '0';
+        observer.observe(el);
+    });
 });
-
-function toggleTheme() {
-    const currentTheme = document.body.className;
-    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-    document.body.className = newTheme;
-    localStorage.setItem('theme', newTheme);
-}
 
 // Export for use in other scripts
 window.toast = toast;
-window.showLoading = showLoading;
-window.showSkeleton = showSkeleton;
+window.ThemeManager = ThemeManager;
+window.LoadingManager = LoadingManager;
+window.SkeletonLoader = SkeletonLoader;
 window.formatFileSize = formatFileSize;
 window.formatExpiryTime = formatExpiryTime;
+window.copyToClipboard = copyToClipboard;
+window.debounce = debounce;
