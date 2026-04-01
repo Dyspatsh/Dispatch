@@ -127,6 +127,11 @@ def get_current_user(db: Session, session_token: str = None):
     if not db_session:
         return None
     user = db_session.user
+    
+    # Check if user still exists (prevents deleted users from accessing)
+    if not user:
+        return None
+    
     if user and user.totp_enabled and not db_session.twofa_verified:
         return None
     if user and user.subscription_expires_at and user.subscription_expires_at < datetime.utcnow():
@@ -873,29 +878,12 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
         func.count(File.id).label("file_count")
     ).outerjoin(File, File.sender_id == User.id).group_by(User.id).order_by(desc("file_count")).limit(50).all()
     
-    files = db.query(File).order_by(desc(File.created_at)).limit(30).all()
-    
     system_health = {
         "cpu_percent": psutil.cpu_percent(interval=1),
         "memory_percent": psutil.virtual_memory().percent,
         "disk_usage": psutil.disk_usage('/').percent,
         "uptime": str(datetime.utcnow() - datetime.fromtimestamp(psutil.boot_time())).split('.')[0]
     }
-    
-    active_logs = []
-    recent_logins = db.query(User).filter(User.last_login > datetime.utcnow() - timedelta(hours=24)).order_by(desc(User.last_login)).limit(10).all()
-    for log in recent_logins:
-        active_logs.append({"type": "login", "username": log.username, "time": log.last_login, "details": "User logged in"})
-    recent_uploads = db.query(File).order_by(desc(File.created_at)).limit(10).all()
-    for file in recent_uploads:
-        active_logs.append({"type": "upload", "username": file.sender.username, "time": file.created_at, "details": f"Uploaded file: {file.filename}"})
-    recent_downloads = db.query(File).filter(File.downloaded_at != None).order_by(desc(File.downloaded_at)).limit(10).all()
-    for file in recent_downloads:
-        active_logs.append({"type": "download", "username": file.recipient.username, "time": file.downloaded_at, "details": f"Downloaded file: {file.filename}"})
-    active_logs.sort(key=lambda x: x["time"], reverse=True)
-    active_logs = active_logs[:30]
-    
-    failed_logins = db.query(User).filter(User.failed_login_attempts > 0).order_by(desc(User.last_failed_login)).limit(20).all()
     
     return templates.TemplateResponse("admin_simple.html", {
         "request": request,
@@ -907,10 +895,7 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
         "users_by_role": users_by_role,
         "files_by_status": files_by_status,
         "users": users,
-        "files": files,
         "system_health": system_health,
-        "failed_logins": failed_logins,
-        "active_logs": active_logs,
         "now": datetime.utcnow()
     })
 
@@ -985,38 +970,10 @@ async def admin_search_users(q: str = "", role: str = "all", status: str = "all"
             "last_login": u.last_login.strftime("%Y-%m-%d") if u.last_login else "Never",
             "is_banned": u.is_banned,
             "ban_reason": u.ban_reason,
-            "days_left": days_left
+            "days_left": days_left  # Added subscription days left
         })
     
     return {"success": True, "users": result}
-
-@app.get("/admin/search-files")
-async def admin_search_files(q: str = "", status: str = "all", user = Depends(get_user_from_session), db: Session = Depends(get_db)):
-    if not user or user.role != "owner":
-        return {"success": False, "error": "Unauthorized"}
-    
-    query = db.query(File)
-    if q:
-        query = query.filter(File.filename.ilike(f"%{q}%"))
-    if status != "all":
-        query = query.filter(File.status == status)
-    
-    files = query.order_by(desc(File.created_at)).limit(30).all()
-    
-    result = []
-    for f in files:
-        result.append({
-            "id": f.id,
-            "filename": f.filename,
-            "size_mb": round(f.file_size / (1024 * 1024), 1),
-            "status": f.status,
-            "sender": f.sender.username,
-            "recipient": f.recipient.username,
-            "created_at": f.created_at.strftime("%Y-%m-%d") if f.created_at else "Unknown",
-            "expires_at": f.expires_at.strftime("%Y-%m-%d") if f.expires_at else "Unknown"
-        })
-    
-    return {"success": True, "files": result}
 
 @app.post("/admin/user/ban/{user_id}")
 async def admin_ban_user(user_id: int, reason: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
@@ -1057,33 +1014,102 @@ async def admin_change_role(user_id: int, role: str = Form(...), user = Depends(
 
 @app.post("/admin/user/delete/{user_id}")
 async def admin_delete_user(user_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+    """Completely delete a user and all associated data"""
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
+    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
+    
+    print(f"[ADMIN] Deleting user: {target.username} (ID: {target.id})")
+    
+    # 1. Delete all physical files (encrypted files on disk)
     files = db.query(File).filter((File.sender_id == target.id) | (File.recipient_id == target.id)).all()
+    deleted_files = 0
     for f in files:
         file_path = os.path.join(UPLOAD_DIR, f.encrypted_filename)
         if os.path.exists(file_path):
             os.remove(file_path)
+            deleted_files += 1
+    print(f"[ADMIN] Deleted {deleted_files} physical files")
+    
+    # 2. Delete all private chat conversations and messages (these will cascade)
+    conversations = db.query(ChatConversation).filter(
+        (ChatConversation.user1_id == target.id) | (ChatConversation.user2_id == target.id)
+    ).all()
+    for conv in conversations:
+        db.delete(conv)
+    print(f"[ADMIN] Deleted {len(conversations)} private conversations")
+    
+    # 3. Delete group memberships
+    group_memberships = db.query(GroupMember).filter(GroupMember.user_id == target.id).all()
+    for gm in group_memberships:
+        db.delete(gm)
+    print(f"[ADMIN] Deleted {len(group_memberships)} group memberships")
+    
+    # 4. Delete group messages sent by user
+    group_messages = db.query(GroupChatMessage).filter(GroupChatMessage.sender_id == target.id).all()
+    for gm in group_messages:
+        db.delete(gm)
+    print(f"[ADMIN] Deleted {len(group_messages)} group messages")
+    
+    # 5. Delete all group invitations (both sent and received)
+    sent_invites = db.query(GroupInvitation).filter(GroupInvitation.inviter_id == target.id).all()
+    for invite in sent_invites:
+        db.delete(invite)
+    
+    received_invites = db.query(GroupInvitation).filter(GroupInvitation.invited_user_id == target.id).all()
+    for invite in received_invites:
+        db.delete(invite)
+    print(f"[ADMIN] Deleted {len(sent_invites) + len(received_invites)} group invitations")
+    
+    # 6. Delete all reactions
+    reactions = db.query(MessageReaction).filter(MessageReaction.user_id == target.id).all()
+    for reaction in reactions:
+        db.delete(reaction)
+    print(f"[ADMIN] Deleted {len(reactions)} reactions")
+    
+    # 7. Delete all read receipts
+    receipts = db.query(MessageReadReceipt).filter(MessageReadReceipt.user_id == target.id).all()
+    for receipt in receipts:
+        db.delete(receipt)
+    print(f"[ADMIN] Deleted {len(receipts)} read receipts")
+    
+    # 8. Delete all blocked users relationships
+    blocks = db.query(BlockedUser).filter(
+        (BlockedUser.user_id == target.id) | (BlockedUser.blocked_user_id == target.id)
+    ).all()
+    for block in blocks:
+        db.delete(block)
+    print(f"[ADMIN] Deleted {len(blocks)} blocked relationships")
+    
+    # 9. Delete all sessions (THIS IS CRITICAL - prevents login after deletion)
+    sessions = db.query(DBSession).filter(DBSession.user_id == target.id).all()
+    for session in sessions:
+        db.delete(session)
+    print(f"[ADMIN] Deleted {len(sessions)} active sessions")
+    
+    # 10. Delete all login history
+    login_history = db.query(LoginHistory).filter(LoginHistory.user_id == target.id).all()
+    for history in login_history:
+        db.delete(history)
+    print(f"[ADMIN] Deleted {len(login_history)} login history records")
+    
+    # 11. Delete all payments
+    payments = db.query(Payment).filter(Payment.user_id == target.id).all()
+    for payment in payments:
+        db.delete(payment)
+    print(f"[ADMIN] Deleted {len(payments)} payment records")
+    
+    # 12. Finally delete the user
+    username = target.username
     db.delete(target)
     db.commit()
-    return {"success": True, "message": f"User {target.username} deleted"}
-
-@app.post("/admin/file/delete/{file_id}")
-async def admin_delete_file(file_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
-    if not user or user.role != "owner":
-        return {"success": False, "error": "Unauthorized"}
-    file = db.query(File).filter(File.id == file_id).first()
-    if not file:
-        return {"success": False, "error": "File not found"}
-    file_path = os.path.join(UPLOAD_DIR, file.encrypted_filename)
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    db.delete(file)
-    db.commit()
-    return {"success": True, "message": f"File {file.filename} deleted"}
+    
+    print(f"[ADMIN] Successfully deleted user: {username} (ID: {user_id})")
+    
+    return {"success": True, "message": f"User {username} and all associated data deleted"}
 
 @app.get("/admin/user/{user_id}")
 async def admin_user_details(user_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
@@ -1158,7 +1184,7 @@ async def admin_user_details(user_id: int, user = Depends(get_user_from_session)
     }
 
 # ============================================
-# ADMIN CHART ENDPOINTS
+# ADMIN CHART ENDPOINTS (KEPT)
 # ============================================
 
 @app.get("/admin/chart/user-growth")
@@ -1278,145 +1304,6 @@ async def chart_activity_heatmap(days: int = 30, session_token: str = Cookie(Non
         })
     
     return {"success": True, "activities": activities}
-
-@app.get("/admin/failed-logins")
-async def admin_failed_logins(session_token: str = Cookie(None), db: Session = Depends(get_db)):
-    user = get_current_user(db, session_token)
-    if not user or user.role != "owner":
-        return {"success": False, "error": "Unauthorized"}
-    
-    failed = db.query(User).filter(User.failed_login_attempts > 0).order_by(desc(User.last_failed_login)).limit(20).all()
-    
-    logins = []
-    for u in failed:
-        logins.append({
-            "username": u.username,
-            "attempts": u.failed_login_attempts,
-            "last_attempt": u.last_failed_login.strftime("%Y-%m-%d %H:%M") if u.last_failed_login else "Never"
-        })
-    
-    return {"success": True, "logins": logins}
-
-@app.get("/admin/active-logs")
-async def admin_active_logs(session_token: str = Cookie(None), db: Session = Depends(get_db)):
-    user = get_current_user(db, session_token)
-    if not user or user.role != "owner":
-        return {"success": False, "error": "Unauthorized"}
-    
-    logs = []
-    
-    recent_logins = db.query(User).filter(User.last_login > datetime.utcnow() - timedelta(hours=24)).order_by(desc(User.last_login)).limit(10).all()
-    for log in recent_logins:
-        logs.append({"type": "login", "username": log.username, "time": log.last_login.strftime("%H:%M:%S"), "details": "User logged in"})
-    
-    recent_uploads = db.query(File).order_by(desc(File.created_at)).limit(10).all()
-    for file in recent_uploads:
-        logs.append({"type": "upload", "username": file.sender.username, "time": file.created_at.strftime("%H:%M:%S"), "details": f"Uploaded file: {file.filename}"})
-    
-    recent_downloads = db.query(File).filter(File.downloaded_at != None).order_by(desc(File.downloaded_at)).limit(10).all()
-    for file in recent_downloads:
-        logs.append({"type": "download", "username": file.recipient.username, "time": file.downloaded_at.strftime("%H:%M:%S"), "details": f"Downloaded file: {file.filename}"})
-    
-    logs.sort(key=lambda x: x["time"], reverse=True)
-    logs = logs[:30]
-    
-    return {"success": True, "logs": logs}
-
-@app.get("/admin/export")
-async def admin_export(
-    users: bool = True,
-    files: bool = True,
-    logs: bool = False,
-    days: str = "all",
-    session_token: str = Cookie(None),
-    db: Session = Depends(get_db)
-):
-    user = get_current_user(db, session_token)
-    if not user or user.role != "owner":
-        return {"success": False, "error": "Unauthorized"}
-    
-    cutoff = None
-    if days != "all":
-        cutoff = datetime.utcnow() - timedelta(days=int(days))
-    
-    import csv
-    import io
-    
-    output = io.StringIO()
-    writer = csv.writer(output)
-    
-    if users:
-        writer.writerow(["User ID", "Username", "Role", "Created At", "Last Login", "Files Sent", "Files Received", "Storage Used (GB)", "Is Banned", "2FA Enabled"])
-        all_users = db.query(User).all()
-        for u in all_users:
-            files_sent = db.query(File).filter(File.sender_id == u.id).count()
-            files_received = db.query(File).filter(File.recipient_id == u.id).count()
-            storage = db.query(func.sum(File.file_size)).filter(File.sender_id == u.id).scalar() or 0
-            writer.writerow([
-                u.id, u.username, u.role, u.created_at.strftime("%Y-%m-%d %H:%M"),
-                u.last_login.strftime("%Y-%m-%d %H:%M") if u.last_login else "Never",
-                files_sent, files_received, round(storage / (1024 * 1024 * 1024), 2),
-                "Yes" if u.is_banned else "No", "Yes" if u.totp_enabled else "No"
-            ])
-    
-    if files:
-        writer.writerow([])
-        writer.writerow(["File ID", "Filename", "Sender", "Recipient", "Size (MB)", "Status", "Created At", "Expires At", "Downloaded At"])
-        query = db.query(File)
-        if cutoff:
-            query = query.filter(File.created_at >= cutoff)
-        all_files = query.all()
-        for f in all_files:
-            writer.writerow([
-                f.id, f.filename, f.sender.username, f.recipient.username,
-                round(f.file_size / (1024 * 1024), 2), f.status,
-                f.created_at.strftime("%Y-%m-%d %H:%M"),
-                f.expires_at.strftime("%Y-%m-%d %H:%M") if f.expires_at else "Never",
-                f.downloaded_at.strftime("%Y-%m-%d %H:%M") if f.downloaded_at else "Never"
-            ])
-    
-    if logs:
-        writer.writerow([])
-        writer.writerow(["Date", "Username", "Event Type", "Details"])
-        login_logs = db.query(LoginHistory).filter(LoginHistory.login_time >= cutoff if cutoff else True).order_by(desc(LoginHistory.login_time)).limit(500).all()
-        for l in login_logs:
-            writer.writerow([l.login_time.strftime("%Y-%m-%d %H:%M"), l.user.username, "Login", "User logged in"])
-    
-    response = Response(
-        output.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=dispatch_export_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"}
-    )
-    return response
-
-@app.get("/admin/export/files")
-async def admin_export_files(session_token: str = Cookie(None), db: Session = Depends(get_db)):
-    user = get_current_user(db, session_token)
-    if not user or user.role != "owner":
-        return {"success": False, "error": "Unauthorized"}
-    
-    import csv
-    import io
-    
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(["File ID", "Filename", "Sender", "Recipient", "Size (MB)", "Status", "Created At", "Expires At"])
-    
-    all_files = db.query(File).order_by(desc(File.created_at)).all()
-    for f in all_files:
-        writer.writerow([
-            f.id, f.filename, f.sender.username, f.recipient.username,
-            round(f.file_size / (1024 * 1024), 2), f.status,
-            f.created_at.strftime("%Y-%m-%d %H:%M"),
-            f.expires_at.strftime("%Y-%m-%d %H:%M") if f.expires_at else "Never"
-        ])
-    
-    response = Response(
-        output.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=dispatch_files_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"}
-    )
-    return response
 
 # 404 handler
 @app.exception_handler(404)

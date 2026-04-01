@@ -9,7 +9,6 @@
         <div class="admin-role-badge">Owner Access</div>
         <div class="last-updated" id="lastUpdated">Last updated: just now</div>
         <div class="header-actions">
-            <button id="exportDataBtn" class="btn btn-secondary btn-small">Export Data</button>
             <button id="refreshStatsBtn" class="btn btn-secondary btn-small">Refresh</button>
         </div>
     </div>
@@ -147,104 +146,14 @@
                         <th>Created</th>
                         <th>Last Login</th>
                         <th>Status</th>
+                        <th>Days Left</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody id="usersList">
-                    <tr><td colspan="10" class="loading-cell">Loading users...</td></tr>
+                    <tr><td colspan="11" class="loading-cell">Loading users...</td></tr>
                 </tbody>
             </table>
-        </div>
-    </div>
-    
-    <!-- Files Table -->
-    <div class="admin-section">
-        <div class="section-header">
-            <h2>Files</h2>
-            <div class="section-controls">
-                <input type="text" id="searchFile" placeholder="Search by filename..." class="search-input">
-                <select id="fileStatusFilter" class="filter-select">
-                    <option value="all">All Status</option>
-                    <option value="pending">Pending</option>
-                    <option value="accepted">Accepted</option>
-                    <option value="declined">Declined</option>
-                    <option value="downloaded">Downloaded</option>
-                    <option value="expired">Expired</option>
-                </select>
-                <button id="exportFilesBtn" class="btn btn-secondary btn-small">Export CSV</button>
-            </div>
-        </div>
-        
-        <div class="table-responsive">
-            <table class="data-table" id="filesTable">
-                <thead>
-                    <tr>
-                        <th>ID</th>
-                        <th>Filename</th>
-                        <th>Sender</th>
-                        <th>Recipient</th>
-                        <th>Size</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                        <th>Expires</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="filesList">
-                    <tr><td colspan="9" class="loading-cell">Loading files...</td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-    
-    <!-- Failed Login Attempts -->
-    <div class="admin-section">
-        <div class="section-header">
-            <h2>Failed Login Attempts</h2>
-        </div>
-        <div class="failed-logins-list" id="failedLoginsList">
-            <div class="loading-spinner">Loading...</div>
-        </div>
-    </div>
-    
-    <!-- Active Logs -->
-    <div class="admin-section">
-        <div class="section-header">
-            <h2>Recent Activity</h2>
-        </div>
-        <div class="active-logs-list" id="activeLogsList">
-            <div class="loading-spinner">Loading...</div>
-        </div>
-    </div>
-</div>
-
-<!-- Export Modal -->
-<div id="exportModal" class="modal" style="display: none;">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3>Export Data</h3>
-            <button class="modal-close" onclick="closeExportModal()">[X]</button>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <label>Select data to export:</label>
-                <label class="checkbox-label"><input type="checkbox" id="exportUsers" checked> Users</label>
-                <label class="checkbox-label"><input type="checkbox" id="exportFiles" checked> Files</label>
-                <label class="checkbox-label"><input type="checkbox" id="exportLogs"> Activity Logs</label>
-            </div>
-            <div class="form-group">
-                <label>Date Range:</label>
-                <select id="exportDateRange">
-                    <option value="7">Last 7 days</option>
-                    <option value="30">Last 30 days</option>
-                    <option value="90">Last 90 days</option>
-                    <option value="all">All time</option>
-                </select>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn-secondary" onclick="closeExportModal()">Cancel</button>
-            <button id="confirmExportBtn" class="btn-primary">Export</button>
         </div>
     </div>
 </div>
@@ -628,57 +537,6 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.75rem;
-}
-
-.checkbox-label {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin: 0.5rem 0;
-    cursor: pointer;
-}
-
-.failed-logins-list, .active-logs-list {
-    max-height: 200px;
-    overflow-y: auto;
-}
-
-.failed-login-item, .log-item {
-    display: flex;
-    gap: 1rem;
-    padding: 0.5rem;
-    border-bottom: 1px solid var(--border-light);
-    font-size: 0.75rem;
-}
-
-.failed-username {
-    font-weight: bold;
-    width: 100px;
-}
-
-.failed-attempts {
-    color: var(--danger);
-    width: 80px;
-}
-
-.failed-time {
-    color: var(--text-muted);
-}
-
-.log-time {
-    width: 80px;
-    color: var(--text-muted);
-    font-family: monospace;
-}
-
-.log-user {
-    width: 120px;
-    font-weight: bold;
-    color: var(--primary);
-}
-
-.log-details {
-    flex: 1;
 }
 
 @media (max-width: 1024px) {
@@ -1075,6 +933,7 @@ function loadUsers() {
                         <td>${u.created_at}</td>
                         <td>${u.last_login}</td>
                         <td><span class="status-badge ${u.is_banned ? 'status-banned' : 'status-active'}">${u.is_banned ? 'Banned' : 'Active'}</span></td>
+                        <td>${u.days_left !== null ? u.days_left + ' days' : '-'}</td>
                         <td class="action-buttons">
                             <button class="btn-icon view-user" data-user-id="${u.id}" title="View Details">👁</button>
                             ${!u.is_banned ? `<button class="btn-icon ban-user" data-user-id="${u.id}" data-username="${escapeHtml(u.username)}" title="Ban">🚫</button>` : `<button class="btn-icon unban-user" data-user-id="${u.id}" data-username="${escapeHtml(u.username)}" title="Unban">✓</button>`}
@@ -1087,7 +946,7 @@ function loadUsers() {
                 attachUserEventListeners();
                 updateBatchButtons();
             } else {
-                tbody.innerHTML = '<tr><td colspan="10" class="loading-cell">No users found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" class="loading-cell">No users found</td></tr>';
             }
         });
 }
@@ -1131,106 +990,6 @@ document.getElementById('selectAllUsers').addEventListener('change', (e) => {
         cb.checked = e.target.checked;
     });
     updateSelectedUsers();
-});
-
-// Load Files Table
-function loadFiles() {
-    const query = document.getElementById('searchFile').value;
-    const status = document.getElementById('fileStatusFilter').value;
-    
-    fetch(`/admin/search-files?q=${encodeURIComponent(query)}&status=${status}`)
-        .then(res => res.json())
-        .then(data => {
-            const tbody = document.getElementById('filesList');
-            if (data.success && data.files && data.files.length > 0) {
-                tbody.innerHTML = data.files.map(f => `
-                    <tr>
-                        <td>${f.id}</td>
-                        <td>${escapeHtml(f.filename)}</td>
-                        <td>${escapeHtml(f.sender)}</td>
-                        <td>${escapeHtml(f.recipient)}</td>
-                        <td>${f.size_mb} MB</td>
-                        <td><span class="status-badge status-${f.status}">${f.status}</span></td>
-                        <td>${f.created_at}</td>
-                        <td>${f.expires_at}</td>
-                        <td><button class="btn-icon delete-file" data-file-id="${f.id}" data-filename="${escapeHtml(f.filename)}" title="Delete">🗑</button></td>
-                    </tr>
-                `).join('');
-                
-                document.querySelectorAll('.delete-file').forEach(btn => {
-                    btn.addEventListener('click', () => deleteFile(btn.dataset.fileId, btn.dataset.filename));
-                });
-            } else {
-                tbody.innerHTML = '<tr><td colspan="9" class="loading-cell">No files found</td></tr>';
-            }
-        });
-}
-
-// Load Failed Logins
-function loadFailedLogins() {
-    fetch('/admin/failed-logins')
-        .then(res => res.json())
-        .then(data => {
-            const container = document.getElementById('failedLoginsList');
-            if (data.success && data.logins && data.logins.length > 0) {
-                container.innerHTML = data.logins.map(l => `
-                    <div class="failed-login-item">
-                        <span class="failed-username">${escapeHtml(l.username)}</span>
-                        <span class="failed-attempts">${l.attempts} attempts</span>
-                        <span class="failed-time">Last: ${l.last_attempt}</span>
-                    </div>
-                `).join('');
-            } else {
-                container.innerHTML = '<div class="empty-state-compact">No failed login attempts recorded</div>';
-            }
-        });
-}
-
-// Load Active Logs
-function loadActiveLogs() {
-    fetch('/admin/active-logs')
-        .then(res => res.json())
-        .then(data => {
-            const container = document.getElementById('activeLogsList');
-            if (data.success && data.logs && data.logs.length > 0) {
-                container.innerHTML = data.logs.map(l => `
-                    <div class="log-item log-${l.type}">
-                        <div class="log-time">${l.time}</div>
-                        <div class="log-user">${escapeHtml(l.username)}</div>
-                        <div class="log-details">${escapeHtml(l.details)}</div>
-                    </div>
-                `).join('');
-            } else {
-                container.innerHTML = '<div class="empty-state-compact">No recent activity</div>';
-            }
-        });
-}
-
-// Export Data
-document.getElementById('exportDataBtn').addEventListener('click', () => {
-    document.getElementById('exportModal').style.display = 'block';
-});
-
-document.getElementById('confirmExportBtn').addEventListener('click', () => {
-    const exportUsers = document.getElementById('exportUsers').checked;
-    const exportFiles = document.getElementById('exportFiles').checked;
-    const exportLogs = document.getElementById('exportLogs').checked;
-    const dateRange = document.getElementById('exportDateRange').value;
-    
-    fetch(`/admin/export?users=${exportUsers}&files=${exportFiles}&logs=${exportLogs}&days=${dateRange}`)
-        .then(res => res.blob())
-        .then(blob => {
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `dispatch_export_${new Date().toISOString().slice(0, 19)}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-            closeExportModal();
-            toast.success('Export completed');
-        });
 });
 
 // Batch Actions
@@ -1322,47 +1081,7 @@ document.getElementById('batchDeleteBtn').addEventListener('click', () => {
     }
 });
 
-document.getElementById('exportFilesBtn').addEventListener('click', () => {
-    fetch('/admin/export/files')
-        .then(res => res.blob())
-        .then(blob => {
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `dispatch_files_${new Date().toISOString().slice(0, 19)}.csv`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
-        });
-});
-
-// Chart controls
-document.querySelectorAll('.chart-period').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.chart-period').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const period = parseInt(btn.dataset.period);
-        currentPeriod = period;
-        loadUserGrowth(period);
-        loadFileActivity(period, currentActivityType);
-    });
-});
-
-document.querySelectorAll('.chart-activity').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.chart-activity').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        currentActivityType = btn.dataset.type;
-        loadFileActivity(currentPeriod, currentActivityType);
-    });
-});
-
 // Modals
-function closeExportModal() {
-    document.getElementById('exportModal').style.display = 'none';
-}
-
 function closeBatchRoleModal() {
     document.getElementById('batchRoleModal').style.display = 'none';
 }
@@ -1418,22 +1137,11 @@ function showRoleModal(userId, username, currentRole) {
 }
 
 function deleteUser(userId, username) {
-    if (confirm(`Permanently delete user "${username}"? This action cannot be undone.`)) {
+    if (confirm(`Permanently delete user "${username}"? This will delete ALL their files, messages, and data. This action cannot be undone.`)) {
         fetch(`/admin/user/delete/${userId}`, { method: 'POST' })
             .then(() => {
-                toast.success(`User ${username} deleted`);
+                toast.success(`User ${username} and all associated data deleted`);
                 loadUsers();
-                loadStats();
-            });
-    }
-}
-
-function deleteFile(fileId, filename) {
-    if (confirm(`Permanently delete file "${filename}"?`)) {
-        fetch(`/admin/file/delete/${fileId}`, { method: 'POST' })
-            .then(() => {
-                toast.success(`File ${filename} deleted`);
-                loadFiles();
                 loadStats();
             });
     }
@@ -1454,6 +1162,27 @@ function updateBatchButtons() {
     document.getElementById('batchDeleteBtn').disabled = !hasSelection;
 }
 
+// Chart controls
+document.querySelectorAll('.chart-period').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.chart-period').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const period = parseInt(btn.dataset.period);
+        currentPeriod = period;
+        loadUserGrowth(period);
+        loadFileActivity(period, currentActivityType);
+    });
+});
+
+document.querySelectorAll('.chart-activity').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.chart-activity').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentActivityType = btn.dataset.type;
+        loadFileActivity(currentPeriod, currentActivityType);
+    });
+});
+
 // Refresh
 document.getElementById('refreshStatsBtn').addEventListener('click', () => {
     loadStats();
@@ -1463,9 +1192,6 @@ document.getElementById('refreshStatsBtn').addEventListener('click', () => {
     loadStorageTrend();
     loadActivityHeatmap();
     loadUsers();
-    loadFiles();
-    loadFailedLogins();
-    loadActiveLogs();
     toast.info('Dashboard refreshed');
 });
 
@@ -1483,8 +1209,6 @@ setInterval(() => {
 document.getElementById('searchUser').addEventListener('keyup', loadUsers);
 document.getElementById('roleFilter').addEventListener('change', loadUsers);
 document.getElementById('statusFilter').addEventListener('change', loadUsers);
-document.getElementById('searchFile').addEventListener('keyup', loadFiles);
-document.getElementById('fileStatusFilter').addEventListener('change', loadFiles);
 
 // Initialize
 initCharts();
@@ -1496,8 +1220,5 @@ loadStorageByRole();
 loadStorageTrend();
 loadActivityHeatmap();
 loadUsers();
-loadFiles();
-loadFailedLogins();
-loadActiveLogs();
 </script>
 {% endblock %}

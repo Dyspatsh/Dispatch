@@ -30,7 +30,7 @@ class User(Base):
     subscription_expires_at = Column(DateTime, nullable=True)
     failed_login_attempts = Column(Integer, default=0)
     last_failed_login = Column(DateTime, nullable=True)
-    read_receipts_enabled = Column(Boolean, default=True)  # ADDED THIS FIELD
+    read_receipts_enabled = Column(Boolean, default=True)
     bio = Column(Text, nullable=True)
     
     # 2FA Fields
@@ -39,26 +39,22 @@ class User(Base):
     recovery_codes_hash = Column(Text, nullable=True)
     
     # Relationships
-    sent_files = relationship("File", foreign_keys="File.sender_id", back_populates="sender")
-    received_files = relationship("File", foreign_keys="File.recipient_id", back_populates="recipient")
-    messages = relationship("Message", foreign_keys="Message.user_id", back_populates="user")
-    sessions = relationship("Session", back_populates="user")
-    user_keys = relationship("UserKey", back_populates="user", uselist=False)
-    sent_invitations = relationship("ChatConversation", foreign_keys="ChatConversation.initiator_id", back_populates="initiator")
-    blocked_users = relationship("BlockedUser", foreign_keys="BlockedUser.user_id", back_populates="user")
-    blocked_by = relationship("BlockedUser", foreign_keys="BlockedUser.blocked_user_id", back_populates="blocked_user")
-    payments = relationship("Payment", back_populates="user")
+    sent_files = relationship("File", foreign_keys="File.sender_id", back_populates="sender", cascade="all, delete-orphan")
+    received_files = relationship("File", foreign_keys="File.recipient_id", back_populates="recipient", cascade="all, delete-orphan")
+    messages = relationship("Message", foreign_keys="Message.user_id", back_populates="user", cascade="all, delete-orphan")
+    sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
+    user_keys = relationship("UserKey", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    sent_invitations = relationship("ChatConversation", foreign_keys="ChatConversation.initiator_id", back_populates="initiator", cascade="all, delete-orphan")
+    blocked_users = relationship("BlockedUser", foreign_keys="BlockedUser.user_id", back_populates="user", cascade="all, delete-orphan")
+    blocked_by = relationship("BlockedUser", foreign_keys="BlockedUser.blocked_user_id", back_populates="blocked_user", cascade="all, delete-orphan")
+    payments = relationship("Payment", back_populates="user", cascade="all, delete-orphan")
     login_history = relationship("LoginHistory", back_populates="user", cascade="all, delete-orphan")
-    
-    # Phase 2 Group Chat Relationships
-    groups = relationship("GroupMember", back_populates="user")
-    group_messages = relationship("GroupChatMessage", foreign_keys="GroupChatMessage.sender_id")
-    message_reactions = relationship("MessageReaction", back_populates="user")
-    read_receipts = relationship("MessageReadReceipt", back_populates="user")
-    
-    # Group Invitation Relationships
-    sent_group_invitations = relationship("GroupInvitation", foreign_keys="GroupInvitation.inviter_id", back_populates="inviter")
-    received_group_invitations = relationship("GroupInvitation", foreign_keys="GroupInvitation.invited_user_id", back_populates="invited_user")
+    groups = relationship("GroupMember", back_populates="user", cascade="all, delete-orphan")
+    group_messages = relationship("GroupChatMessage", foreign_keys="GroupChatMessage.sender_id", cascade="all, delete-orphan")
+    message_reactions = relationship("MessageReaction", back_populates="user", cascade="all, delete-orphan")
+    read_receipts = relationship("MessageReadReceipt", back_populates="user", cascade="all, delete-orphan")
+    sent_group_invitations = relationship("GroupInvitation", foreign_keys="GroupInvitation.inviter_id", back_populates="inviter", cascade="all, delete-orphan")
+    received_group_invitations = relationship("GroupInvitation", foreign_keys="GroupInvitation.invited_user_id", back_populates="invited_user", cascade="all, delete-orphan")
 
 class File(Base):
     __tablename__ = "files"
