@@ -1,4 +1,4 @@
-{% extends "simple_base.html" %}
+{% extends "base.html" %}
 
 {% block title %}About Dispatch{% endblock %}
 
@@ -6,57 +6,94 @@
 <div class="about">
     <h1>About Dispatch</h1>
     
+    <div class="disclaimer-box">
+        <strong>Important Disclosure</strong>
+        <p>This page describes how Dispatch is designed to work. Some security claims have limitations. Read the detailed explanations below.</p>
+    </div>
+    
     <div class="about-section">
         <h2>What is Dispatch?</h2>
-        <p>Dispatch is a Tor-only, privacy-focused file sharing and communication platform where users can send encrypted files, engage in private and group chats, and manage their digital presence with complete anonymity. All data is encrypted client-side, and even the platform owner cannot access user content.</p>
-        <p>Built for privacy advocates, journalists, activists, and anyone who values their digital freedom, Dispatch operates exclusively on the Tor network, ensuring no IP addresses are ever logged or exposed.</p>
+        <p>Dispatch is a Tor-only file sharing and communication platform. Users can send encrypted files, chat privately, and manage their accounts. The service is accessible only as a Tor hidden service.</p>
+        <p>The platform has no advertisements, popups, or sponsored content.</p>
     </div>
     
     <div class="about-section">
-        <h2>How It Works</h2>
-        <ul>
-            <li><strong>Client-Side Encryption:</strong> Files are encrypted in your browser using AES-256-GCM before upload. The encryption key never leaves your device.</li>
-            <li><strong>File Transfer Flow:</strong> Send a file → Recipient accepts → File becomes available for download → Auto-deletes after expiry (24-72 hours pending, 7 days after acceptance).</li>
-            <li><strong>Private Chat:</strong> End-to-end encrypted messages with read receipts, typing indicators, and message search for Pro+ users. Messages auto-delete after 24 hours.</li>
-            <li><strong>Group Chats:</strong> Create groups with unlimited members (Premium only), manage members, promote admins, and enjoy the same encryption and auto-delete features.</li>
-            <li><strong>Account Recovery:</strong> Each account is created with a unique 64-character recovery phrase. This is the only way to recover your account if you forget your password or PIN.</li>
-        </ul>
+        <h2>How File Encryption Works (Honest Explanation)</h2>
+        <div class="honest-card">
+            <h3>What Actually Happens</h3>
+            <ol>
+                <li><strong>Step 1:</strong> A random AES-256 encryption key is generated in your browser</li>
+                <li><strong>Step 2:</strong> Your file is encrypted with this key in your browser</li>
+                <li><strong>Step 3:</strong> The encrypted file is uploaded to the server</li>
+                <li><strong>Step 4:</strong> The encryption key is encrypted with the recipient's password hash</li>
+                <li><strong>Step 5:</strong> The encrypted key is stored in the database</li>
+            </ol>
+            <p><strong>Limitation:</strong> The server stores an encrypted version of your encryption key. The server owner has access to the encrypted key and the recipient's password hash. With both, the file could theoretically be decrypted.</p>
+            <p><strong>Mitigation:</strong> The password hash is salted and hashed with Argon2id, making decryption computationally expensive. The server does not store plaintext passwords.</p>
+        </div>
     </div>
     
     <div class="about-section">
-        <h2>Security Features</h2>
+        <h2>Privacy & IP Addresses (Honest Explanation)</h2>
+        <div class="honest-card">
+            <h3>What Actually Happens</h3>
+            <ul>
+                <li><strong>Tor Access:</strong> The service is only available as a Tor hidden service. Your real IP address never reaches the server because Tor routes your traffic through the Tor network.</li>
+                <li><strong>IP Address Storage:</strong> The server does see and temporarily store the Tor exit node IP address for:
+                    <ul>
+                        <li>Rate limiting (5 requests per minute)</li>
+                        <li>Login lockout tracking (5 failed attempts = 30 minute lockout)</li>
+                        <li>Security logs (stored for 30 days)</li>
+                    </ul>
+                </li>
+                <li><strong>No Real IP Exposure:</strong> Since all traffic goes through Tor, the server only sees Tor exit node IPs, not your actual location or IP address.</li>
+            </ul>
+            <p><strong>Limitation:</strong> The server does log Tor exit node IPs for security purposes. These are stored for 30 days and automatically deleted.</p>
+        </div>
+    </div>
+    
+    <div class="about-section">
+        <h2>Security Features (What Actually Exists)</h2>
         <div class="features-grid">
             <div class="feature-card">
-                <h3>End-to-End Encryption</h3>
-                <p>All files and messages are encrypted client-side using AES-256-GCM, the same standard used by governments and militaries worldwide. Your data is encrypted before it ever leaves your device, and decrypted only when you choose to download or view it.</p>
+                <h3>Client-Side Encryption</h3>
+                <p>Files are encrypted with AES-256-GCM in your browser before upload. The server receives only encrypted data. The encryption key is encrypted with the recipient's password hash before storage.</p>
             </div>
             <div class="feature-card">
                 <h3>Tor-Only Access</h3>
-                <p>Dispatch is exclusively available as a Tor hidden service. Your IP address is never logged, stored, or even visible to the server. Combined with Tor's onion routing, your identity remains completely anonymous.</p>
+                <p>The service is exclusively a Tor hidden service. Your real IP address is never exposed to the server. Tor exit node IPs are logged for security purposes.</p>
             </div>
             <div class="feature-card">
                 <h3>Two-Factor Authentication</h3>
-                <p>Secure your account with TOTP-based 2FA (Google Authenticator, Authy, etc.). Generate backup codes for emergency access. Each backup code can be used only once.</p>
+                <p>TOTP-based 2FA (Google Authenticator, Authy) with 10 backup codes. Failed 2FA attempts: 5 failures = 15 minute lockout.</p>
             </div>
             <div class="feature-card">
-                <h3>Account Lockout Protection</h3>
-                <p>After 5 failed login attempts, accounts are locked for 30 minutes. This prevents brute-force attacks while maintaining usability.</p>
+                <h3>Account Lockout</h3>
+                <p>5 failed login attempts = 30 minute lockout. 5 failed 2FA attempts = 15 minute lockout. Lockouts are tracked by username.</p>
             </div>
             <div class="feature-card">
-                <h3>Argon2 Password Hashing</h3>
-                <p>All passwords, PINs, and recovery phrases are hashed using Argon2id, the winner of the Password Hashing Competition and the most secure password hashing algorithm available.</p>
+                <h3>Argon2id Password Hashing</h3>
+                <p>All passwords, PINs, and recovery phrases are hashed using Argon2id. This is currently the strongest password hashing algorithm available.</p>
             </div>
             <div class="feature-card">
                 <h3>XSS Protection</h3>
-                <p>All user-generated content is HTML-escaped before display, preventing cross-site scripting attacks. No user input is ever rendered as raw HTML.</p>
+                <p>All user input is HTML-escaped before display. Content Security Policy headers restrict script execution.</p>
             </div>
             <div class="feature-card">
                 <h3>HTTP-Only Cookies</h3>
-                <p>Session cookies are set with HttpOnly and SameSite=Lax flags, preventing JavaScript access and CSRF attacks.</p>
+                <p>Session cookies use HttpOnly, Secure, and SameSite=Lax flags. CSRF tokens protect state-changing requests.</p>
             </div>
             <div class="feature-card">
-                <h3>No IP Logging</h3>
-                <p>By operating exclusively on Tor, Dispatch never sees your real IP address. No logs are kept, no analytics are tracked, and no third-party services are used.</p>
+                <h3>Rate Limiting</h3>
+                <p>Login: 5 per minute. Registration: 5 per hour. File uploads: 20 per hour. Search: 10 per minute.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Session Revocation</h3>
+                <p>Password changes terminate all other active sessions. Banned users are immediately logged out.</p>
+            </div>
+            <div class="feature-card">
+                <h3>Security Headers</h3>
+                <p>Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy headers are set.</p>
             </div>
         </div>
     </div>
@@ -64,66 +101,63 @@
     <div class="about-section">
         <h2>File Features</h2>
         <ul>
-            <li><strong>Drag & Drop Upload:</strong> Simply drag files into the drop zone or click to browse. Upload multiple files at once with queue management.</li>
-            <li><strong>File Preview:</strong> See thumbnails for images and file-type icons for documents, videos, and archives before sending.</li>
-            <li><strong>File Encryption:</strong> All files are encrypted with AES-256-GCM before upload. The encryption key is generated in your browser and never transmitted.</li>
-            <li><strong>Custom Expiration:</strong> Pro and Premium users can set custom expiration times for their files (1-7 days). Free users have standard 7-day expiration.</li>
-            <li><strong>Password Protection:</strong> Pro and Premium users can add password protection to files. Recipients must enter the password to download.</li>
-            <li><strong>File Acceptance Workflow:</strong> Recipients must explicitly accept files before they can be downloaded. This prevents unwanted content and gives control to the recipient.</li>
-            <li><strong>File History:</strong> View all files you've sent and received, with status tracking (pending, accepted, declined, downloaded, expired).</li>
+            <li><strong>File Size Limits:</strong> Free: 1 GB, Pro: 5 GB, Premium: 10 GB, Owner: unlimited</li>
+            <li><strong>Concurrent Files:</strong> Free: 10, Pro: 50, Premium: 100, Owner: unlimited</li>
+            <li><strong>File Expiration:</strong> Files auto-delete after 7 days. Pro/Premium users can set custom expiration (1-7 days)</li>
+            <li><strong>Password Protection:</strong> Pro/Premium users can add passwords to files</li>
+            <li><strong>File History:</strong> View sent/received files with status: pending, accepted, declined, downloaded, expired, cancelled</li>
+            <li><strong>File Type Validation:</strong> Only allowed file types can be uploaded (images, documents, archives, videos, audio)</li>
         </ul>
     </div>
     
     <div class="about-section">
         <h2>Chat Features</h2>
         <ul>
-            <li><strong>Private Encrypted Chat:</strong> End-to-end encrypted messages with real-time delivery via WebSocket.</li>
-            <li><strong>Read Receipts:</strong> See when your messages are sent, delivered, and read (Premium users can disable).</li>
-            <li><strong>Typing Indicators:</strong> Real-time indication when the other user is typing.</li>
-            <li><strong>Message Search:</strong> Pro+ users can search their message history by keyword.</li>
-            <li><strong>Message Reactions:</strong> React to messages with [Like], [Thanks], [Agree], or [Helpful].</li>
-            <li><strong>Group Chats:</strong> Premium users can create groups with unlimited members. Group admins can promote members, remove users, and edit group descriptions.</li>
-            <li><strong>Group Member Management:</strong> View all members, see their roles (Owner, Admin, Member), and manage permissions.</li>
-            <li><strong>Message Auto-Delete:</strong> All chat messages (private and group) automatically delete 24 hours after being sent.</li>
+            <li><strong>Private Chat:</strong> Pro and Premium users only. Messages auto-delete after 24 hours.</li>
+            <li><strong>Group Chats:</strong> Premium users only. Unlimited members, admin promotion, member removal.</li>
+            <li><strong>Read Receipts:</strong> Premium users can disable read receipts. Free and Pro users always send read receipts.</li>
+            <li><strong>Typing Indicators:</strong> Real-time typing status for private chats.</li>
+            <li><strong>Message Reactions:</strong> Like, Thanks, Agree, Helpful (group chats only).</li>
+            <li><strong>Message Search:</strong> Pro+ users can search private chat history.</li>
         </ul>
     </div>
     
     <div class="about-section">
         <h2>Account Features</h2>
         <ul>
-            <li><strong>User Profiles:</strong> View user profiles by clicking usernames in chat. See join date, role, bio, and file statistics.</li>
-            <li><strong>Bio:</strong> Pro and Premium users can set a short bio about themselves (max 200 characters).</li>
-            <li><strong>File Statistics:</strong> View your total files sent/received, storage used, and active files count.</li>
-            <li><strong>Theme Selection:</strong> Choose between light and dark mode. Preference is saved to your account.</li>
-            <li><strong>Login History:</strong> View your last 30 days of login activity.</li>
-            <li><strong>Blocked Users:</strong> Block users to prevent them from contacting you or sending files.</li>
-            <li><strong>Account Recovery:</strong> Recover your account using your unique 64-character recovery phrase (provided at registration).</li>
+            <li><strong>User Profiles:</strong> View username, role, join date, bio, file statistics.</li>
+            <li><strong>Bio:</strong> Pro and Premium users only. Max 200 characters.</li>
+            <li><strong>File Statistics:</strong> Files sent/received, storage used, active files.</li>
+            <li><strong>Theme:</strong> Light and dark mode. Saved to account.</li>
+            <li><strong>Login History:</strong> Last 30 days of logins.</li>
+            <li><strong>Security Logs:</strong> Login attempts, 2FA events, password changes, admin actions. Stored for 30 days. IP addresses (Tor exit nodes) are stored.</li>
+            <li><strong>Blocked Users:</strong> Block users from contacting you.</li>
+            <li><strong>Account Recovery:</strong> 64-character recovery phrase provided at registration. This is hashed with Argon2id.</li>
+            <li><strong>Subscription Expiration:</strong> Pro and Premium roles expire after 30 days and revert to Free user.</li>
         </ul>
     </div>
     
     <div class="about-section">
         <h2>Admin Features</h2>
         <ul>
-            <li><strong>Dashboard Analytics:</strong> View real-time charts for user growth, file activity, and storage usage trends.</li>
-            <li><strong>System Health Monitoring:</strong> Monitor CPU, memory, disk usage, and server uptime.</li>
-            <li><strong>User Activity Heatmap:</strong> Visual representation of user activity over time.</li>
-            <li><strong>User Management:</strong> Search, filter, ban, unban, change roles, and delete users.</li>
-            <li><strong>File Management:</strong> Search, filter, and delete any file (for content moderation).</li>
-            <li><strong>Batch Actions:</strong> Select multiple users for bulk ban, unban, role change, or deletion.</li>
-            <li><strong>Data Export:</strong> Export user and file data to CSV format for analysis or backup.</li>
-            <li><strong>Failed Login Monitoring:</strong> Track accounts with repeated failed login attempts.</li>
+            <li><strong>Dashboard:</strong> User growth charts, file activity, storage trends.</li>
+            <li><strong>System Health:</strong> CPU, memory, disk usage, uptime.</li>
+            <li><strong>User Management:</strong> Search, ban, unban, change roles, delete users. Banned users are immediately logged out.</li>
+            <li><strong>Batch Actions:</strong> Select multiple users for bulk operations.</li>
+            <li><strong>Subscription Management:</strong> Setting a user to Pro/Premium sets a 30-day expiration.</li>
+            <li><strong>Audit Logs:</strong> All admin actions are logged with timestamps.</li>
         </ul>
     </div>
     
     <div class="about-section">
-        <h2>Data Retention & Privacy</h2>
+        <h2>Data Retention</h2>
         <ul>
-            <li><strong>Files:</strong> Automatically deleted after expiration (7 days for free users, custom for Pro/Premium).</li>
-            <li><strong>Chat Messages:</strong> Automatically deleted 24 hours after sending.</li>
-            <li><strong>Login History:</strong> Stored for 30 days only, then automatically purged.</li>
-            <li><strong>Sessions:</strong> Active sessions expire after 7 days of inactivity.</li>
-            <li><strong>No IP Logs:</strong> The server never sees or logs your IP address due to Tor operation.</li>
-            <li><strong>No Third Parties:</strong> Dispatch does not use Google Analytics, CDNs, or any external services that could track you.</li>
+            <li><strong>Files:</strong> Deleted from filesystem and database when expired or manually deleted.</li>
+            <li><strong>Chat Messages:</strong> Deleted 24 hours after sending.</li>
+            <li><strong>Login History:</strong> Deleted after 30 days.</li>
+            <li><strong>Security Logs:</strong> Deleted after 30 days.</li>
+            <li><strong>Failed Login Attempts:</strong> Deleted after 7 days.</li>
+            <li><strong>Sessions:</strong> Expire after 7 days of inactivity.</li>
         </ul>
     </div>
     
@@ -133,17 +167,18 @@
             <li><strong>Backend:</strong> FastAPI (Python) with SQLAlchemy ORM</li>
             <li><strong>Database:</strong> PostgreSQL</li>
             <li><strong>Encryption:</strong> AES-256-GCM (client-side), Argon2id (password hashing)</li>
-            <li><strong>Real-time Communication:</strong> WebSockets</li>
-            <li><strong>Authentication:</strong> HTTP-only cookies with 2FA support</li>
-            <li><strong>Frontend:</strong> Vanilla JavaScript, HTML5, CSS3 with glassmorphism design</li>
+            <li><strong>Real-time:</strong> WebSockets</li>
+            <li><strong>Authentication:</strong> HTTP-only cookies, CSRF tokens, TOTP 2FA</li>
+            <li><strong>Rate Limiting:</strong> SlowAPI</li>
+            <li><strong>Frontend:</strong> Vanilla JavaScript, HTML5, CSS3</li>
             <li><strong>Network:</strong> Tor hidden service (.onion only)</li>
         </ul>
     </div>
     
     <div class="about-section">
         <h2>Contact</h2>
-        <p>For support, questions, or security concerns, please contact us at: <strong>dispatsh@proton.me</strong></p>
-        <p class="note">All communications are encrypted and handled with strict privacy practices.</p>
+        <p>For support or security concerns: <strong>dispatsh@proton.me</strong></p>
+        <p>For security vulnerabilities, please use encrypted email (PGP available on request).</p>
     </div>
 </div>
 
@@ -157,6 +192,26 @@
 .about h1 {
     margin-bottom: 2rem;
     text-align: center;
+}
+
+.disclaimer-box {
+    background: #fef3c7;
+    border-left: 4px solid #f59e0b;
+    padding: 1rem;
+    margin-bottom: 2rem;
+    border-radius: var(--radius-md);
+    color: #92400e;
+}
+
+body.dark .disclaimer-box {
+    background: #422800;
+    border-left-color: #f59e0b;
+    color: #ffd89a;
+}
+
+.disclaimer-box strong {
+    display: block;
+    margin-bottom: 0.5rem;
 }
 
 .about-section {
@@ -175,15 +230,60 @@
     color: var(--primary);
 }
 
-.about-section h3 {
-    margin: 1rem 0 0.5rem 0;
+.honest-card {
+    background: var(--bg-tertiary);
+    padding: 1.25rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
+    margin: 1rem 0;
+}
+
+.honest-card h3 {
+    color: var(--warning);
+    margin-bottom: 0.75rem;
+}
+
+.honest-card ol, .honest-card ul {
+    margin: 0.75rem 0;
+    padding-left: 1.5rem;
+}
+
+.honest-card li {
+    margin: 0.5rem 0;
+    color: var(--text-secondary);
+}
+
+.honest-card p {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-light);
+    color: var(--text-primary);
+}
+
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1rem;
+}
+
+.feature-card {
+    background: var(--bg-tertiary);
+    padding: 1.25rem;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-light);
+}
+
+.feature-card h3 {
+    margin-bottom: 0.75rem;
     font-size: 1rem;
     color: var(--primary);
 }
 
-.about-section p {
-    margin-bottom: 1rem;
-    line-height: 1.6;
+.feature-card p {
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin: 0;
     color: var(--text-secondary);
 }
 
@@ -211,44 +311,6 @@
     color: var(--text-primary);
 }
 
-.features-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 1.5rem;
-    margin-top: 1rem;
-}
-
-.feature-card {
-    background: var(--bg-tertiary);
-    padding: 1.25rem;
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border-light);
-    transition: all var(--transition-fast);
-}
-
-.feature-card:hover {
-    transform: translateY(-3px);
-    box-shadow: var(--shadow-md);
-}
-
-.feature-card h3 {
-    margin-bottom: 0.75rem;
-    font-size: 1rem;
-    color: var(--primary);
-}
-
-.feature-card p {
-    font-size: 0.875rem;
-    line-height: 1.5;
-    margin: 0;
-}
-
-.note {
-    font-size: 0.875rem;
-    font-style: italic;
-    margin-top: 0.5rem;
-}
-
 @media (max-width: 768px) {
     .features-grid {
         grid-template-columns: 1fr;
@@ -256,10 +318,6 @@
     
     .about-section h2 {
         font-size: 1.2rem;
-    }
-    
-    .about-section li {
-        font-size: 0.9rem;
     }
 }
 </style>

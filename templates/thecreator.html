@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+{% extends "simple_base.html" %}
 
 {% block title %}The Creator{% endblock %}
 
@@ -7,6 +7,7 @@
     <div class="creator-header">
         <h1>The Creator</h1>
         <p class="creator-tagline">Building privacy tools for the Tor network</p>
+        <div class="no-ads-badge">No Advertisements - No Popups - No Sponsored Content</div>
     </div>
     
     <div class="creator-content">
@@ -33,49 +34,50 @@
             
             <div class="bio-section">
                 <h3>Why I Built Dispatch</h3>
-                <p>I created Dispatch because I believe privacy is not a luxury—it's a right. While big tech companies profit from your data, I built a platform where your files and messages belong to you. No tracking. No logs. No compromises.</p>
-                <p>Dispatch is hosted on my own server, running entirely on the Tor network. Every file is encrypted before it leaves your browser, and every message is secured with end-to-end encryption. I built this because I wanted a truly private way to share files and communicate, and I'm sharing it with you.</p>
+                <p>I created Dispatch because I wanted a private way to share files on the Tor network. Existing solutions either had ads, tracking, or were not designed for Tor. I built this platform to address that gap.</p>
+                <p>Dispatch runs on my own server as a Tor hidden service. Files are encrypted before upload. Messages auto-delete after 24 hours. The platform has no advertisements of any kind.</p>
+                <p><strong>No ads. No popups. No banners. No sponsored content.</strong></p>
             </div>
             
             <div class="bio-section">
                 <h3>My Mission</h3>
-                <p>To provide a secure, anonymous, and truly private platform for file sharing and communication—free from surveillance, tracking, and data collection. Privacy should be the default, not an afterthought.</p>
+                <p>To provide a usable, ad-free file sharing and communication platform for the Tor network. Privacy tools should be accessible without tolerating advertisements or tracking.</p>
             </div>
         </div>
         
         <div class="creator-card">
             <h2>Where Your Money Goes</h2>
-            <p>When you upgrade to Pro or Premium, your contribution goes directly toward:</p>
+            <p>When you upgrade to Pro or Premium, payments go toward:</p>
             <div class="funding-breakdown">
                 <div class="funding-item">
                     <div class="funding-label">Server & Infrastructure</div>
                     <div class="funding-bar"><div class="funding-fill" style="width: 45%;"></div></div>
                     <div class="funding-percent">45%</div>
-                    <div class="funding-desc">Server hosting, bandwidth, and maintenance</div>
+                    <div class="funding-desc">Server hosting, bandwidth, maintenance</div>
                 </div>
                 <div class="funding-item">
-                    <div class="funding-label">Development & Improvement</div>
+                    <div class="funding-label">Development</div>
                     <div class="funding-bar"><div class="funding-fill" style="width: 40%;"></div></div>
                     <div class="funding-percent">40%</div>
-                    <div class="funding-desc">Time spent coding, adding features, fixing bugs</div>
+                    <div class="funding-desc">Development time, feature additions, bug fixes</div>
                 </div>
                 <div class="funding-item">
-                    <div class="funding-label">Continuous Learning</div>
+                    <div class="funding-label">Security Research</div>
                     <div class="funding-bar"><div class="funding-fill" style="width: 15%;"></div></div>
                     <div class="funding-percent">15%</div>
-                    <div class="funding-desc">Security research, tools, and education</div>
+                    <div class="funding-desc">Tools, learning, security improvements</div>
                 </div>
             </div>
-            <p class="funding-note">Every upgrade helps keep Dispatch running and improving. I believe in full transparency—this is exactly where your support goes.</p>
+            <p class="funding-note">No money is spent on advertising. The platform has no ads.</p>
         </div>
         
         <div class="creator-card">
-            <h2>Open Source & Transparency</h2>
-            <p>Dispatch is open source, meaning anyone can inspect the code to verify that there are no backdoors, no tracking, and no hidden data collection. Your trust is earned through transparency.</p>
+            <h2>Open Source</h2>
+            <p>Dispatch code is available on GitHub for independent review.</p>
             <div class="oss-info">
                 <div class="oss-item">
                     <span class="oss-label">License:</span>
-                    <span class="oss-value">GNU General Public License v3 (GPLv3)</span>
+                    <span class="oss-value">GNU GPL v3</span>
                 </div>
                 <div class="oss-item">
                     <span class="oss-label">Repository:</span>
@@ -83,14 +85,14 @@
                 </div>
                 <div class="oss-item">
                     <span class="oss-label">Purpose:</span>
-                    <span class="oss-value">Full transparency—see exactly how your data is handled</span>
+                    <span class="oss-value">Verify there are no backdoors or tracking</span>
                 </div>
                 <div class="oss-item">
                     <span class="oss-label">Report Issues:</span>
                     <span class="oss-value"><a href="https://github.com/Dyspatsh/Dispatch/issues" target="_blank" rel="noopener noreferrer">GitHub Issues</a></span>
                 </div>
             </div>
-            <p class="oss-note">The code is open for anyone to audit. This ensures there are no hidden trackers, no backdoors, and no surprises. Your privacy is verifiable.</p>
+            <p class="oss-note">The code is open for anyone to audit. Security vulnerabilities can be reported through GitHub or email.</p>
         </div>
         
         <div class="creator-card">
@@ -100,16 +102,8 @@
                     <div class="timeline-dot"></div>
                     <div class="timeline-content">
                         <div class="timeline-date">Started</div>
-                        <div class="timeline-title">Dispatch was born</div>
-                        <div class="timeline-desc">A personal project to solve the lack of private file sharing on Tor</div>
-                    </div>
-                </div>
-                <div class="timeline-item">
-                    <div class="timeline-dot"></div>
-                    <div class="timeline-content">
-                        <div class="timeline-date">Phase 1</div>
-                        <div class="timeline-title">File Sharing</div>
-                        <div class="timeline-desc">Encrypted file uploads, drag & drop, queue system</div>
+                        <div class="timeline-title">Dispatch launched</div>
+                        <div class="timeline-desc">Basic file sharing on Tor</div>
                     </div>
                 </div>
                 <div class="timeline-item">
@@ -117,7 +111,7 @@
                     <div class="timeline-content">
                         <div class="timeline-date">Phase 2</div>
                         <div class="timeline-title">Chat System</div>
-                        <div class="timeline-desc">Private chats, group chats, reactions, read receipts</div>
+                        <div class="timeline-desc">Private and group chats added</div>
                     </div>
                 </div>
                 <div class="timeline-item">
@@ -125,30 +119,30 @@
                     <div class="timeline-content">
                         <div class="timeline-date">Phase 3</div>
                         <div class="timeline-title">User Profiles</div>
-                        <div class="timeline-desc">Bios, file statistics, user profiles, clickable usernames</div>
+                        <div class="timeline-desc">Bios, statistics, clickable profiles</div>
                     </div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-dot"></div>
                     <div class="timeline-content">
-                        <div class="timeline-date">Current</div>
-                        <div class="timeline-title">Admin Dashboard & Security</div>
-                        <div class="timeline-desc">Analytics, user management, 2FA, session control</div>
+                        <div class="timeline-date">Phase 4</div>
+                        <div class="timeline-title">Security Enhancements</div>
+                        <div class="timeline-desc">Rate limiting, CSRF, 2FA lockout, security logs</div>
                     </div>
                 </div>
                 <div class="timeline-item">
                     <div class="timeline-dot future"></div>
                     <div class="timeline-content">
                         <div class="timeline-date">Future</div>
-                        <div class="timeline-title">What's Next?</div>
-                        <div class="timeline-desc">More features, improved performance, and always staying true to privacy</div>
+                        <div class="timeline-title">Planned</div>
+                        <div class="timeline-desc">Continued security improvements and feature additions</div>
                     </div>
                 </div>
             </div>
         </div>
         
         <div class="creator-card">
-            <h2>Connect With Me</h2>
+            <h2>Contact</h2>
             <div class="social-links">
                 <a href="https://github.com/Dyspatsh/Dispatch" target="_blank" rel="noopener noreferrer" class="social-link">
                     <span class="social-icon">[Git]</span>
@@ -165,45 +159,19 @@
                     <span class="social-name">Email</span>
                     <span class="social-handle">dispatsh@proton.me</span>
                 </a>
-                <div class="social-link soon">
-                    <span class="social-icon">[+]</span>
-                    <span class="social-name">WhatsApp Channel</span>
-                    <span class="social-handle">Coming soon</span>
-                </div>
-                <div class="social-link soon">
-                    <span class="social-icon">[+]</span>
-                    <span class="social-name">Discord Server</span>
-                    <span class="social-handle">Coming soon</span>
-                </div>
-                <div class="social-link soon">
-                    <span class="social-icon">[+]</span>
-                    <span class="social-name">YouTube</span>
-                    <span class="social-handle">Coming soon</span>
-                </div>
-                <div class="social-link soon">
-                    <span class="social-icon">[+]</span>
-                    <span class="social-name">TikTok</span>
-                    <span class="social-handle">Coming soon</span>
-                </div>
-                <div class="social-link soon">
-                    <span class="social-icon">[+]</span>
-                    <span class="social-name">Instagram</span>
-                    <span class="social-handle">Coming soon</span>
-                </div>
             </div>
         </div>
         
         <div class="creator-card">
-            <h2>Special Thanks</h2>
-            <p>Dispatch wouldn't be what it is without the trust and support of its users. Thank you for believing in privacy, for choosing anonymous communication, and for supporting a platform that puts users first.</p>
-            <p class="thanks-note">To everyone who has used Dispatch, reported issues, shared feedback, or upgraded to support the project—thank you. You make this possible.</p>
+            <h2>Acknowledgments</h2>
+            <p>Thank you to everyone who has used Dispatch, reported issues, and provided feedback. Your support helps improve the platform.</p>
         </div>
         
         <div class="creator-card">
             <h2>Mission Statement</h2>
             <div class="mission-quote">
-                <p>"Privacy is not about hiding something. It's about having control over your own information. Dispatch gives you that control."</p>
-                <p class="quote-author">— Elio, Creator of Dispatch</p>
+                <p>"Dispatch is an ad-free file sharing and communication platform for the Tor network. No ads. No popups. No sponsored content."</p>
+                <p class="quote-author">— Elio</p>
             </div>
         </div>
     </div>
@@ -230,6 +198,17 @@
     color: var(--text-muted);
 }
 
+.no-ads-badge {
+    display: inline-block;
+    margin-top: 0.75rem;
+    background: var(--gradient-primary);
+    color: white;
+    padding: 0.3rem 1rem;
+    border-radius: 50px;
+    font-size: 0.8rem;
+    font-weight: bold;
+}
+
 .creator-content {
     display: flex;
     flex-direction: column;
@@ -238,16 +217,9 @@
 
 .creator-card {
     background: var(--bg-glass);
-    backdrop-filter: blur(var(--blur-amount));
     border-radius: var(--radius-lg);
     border: 1px solid var(--border-light);
     padding: 1.5rem;
-    transition: all var(--transition-fast);
-}
-
-.creator-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-lg);
 }
 
 .creator-card h2 {
@@ -339,11 +311,10 @@
     color: var(--text-muted);
 }
 
-.funding-note, .oss-note, .thanks-note {
+.funding-note, .oss-note {
     font-size: 0.8rem;
     color: var(--text-muted);
     margin-top: 0.75rem;
-    font-style: italic;
 }
 
 .oss-info {
@@ -447,24 +418,12 @@
     background: var(--bg-tertiary);
     border-radius: var(--radius-md);
     text-decoration: none;
-    transition: all var(--transition-fast);
     border: 1px solid var(--border-light);
 }
 
 .social-link:hover {
     transform: translateX(5px);
     border-color: var(--primary);
-    background: var(--bg-glass);
-}
-
-.social-link.soon {
-    opacity: 0.6;
-    cursor: default;
-}
-
-.social-link.soon:hover {
-    transform: none;
-    border-color: var(--border-light);
 }
 
 .social-icon {

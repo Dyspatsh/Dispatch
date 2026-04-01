@@ -5,30 +5,216 @@
 {% block content %}
 <div class="hero">
     <h1>Dispatch</h1>
-    <h2>Privacy-Focused Tor File Sharing</h2>
-    <p>Send encrypted files anonymously. No tracking. No logs. Tor only.</p>
+    <h2>Tor File Sharing Platform</h2>
+    <p>Send encrypted files. Chat privately. No advertisements. No popups.</p>
+    
+    {% if user %}
+    <div class="welcome-message">
+        <h3>Welcome, {{ user.username }}</h3>
+        <p>Role: <strong>{{ user.role|capitalize }}</strong></p>
+        {% if user.role in ['pro', 'premium'] and user.subscription_expires_at %}
+            {% set days_left = ((user.subscription_expires_at - now).days) %}
+            {% if days_left > 0 %}
+                <p>Subscription expires in {{ days_left }} days</p>
+            {% else %}
+                <p>Subscription expired. <a href="/roles/upgrade">Renew</a></p>
+            {% endif %}
+        {% endif %}
+    </div>
     
     <div class="features">
         <div class="feature">
-            <h3>Client-Side Encryption</h3>
-            <p>Files encrypted before upload. We never see your data.</p>
-        </div>
-        <div class="feature">
-            <h3>Complete Anonymity</h3>
-            <p>Tor-only access. No IP logging. No tracking.</p>
+            <h3>Send Files</h3>
+            <p>Share files up to {{ '10 GB' if user.role == 'premium' else '5 GB' if user.role == 'pro' else '1 GB' }}.</p>
+            <a href="/send" class="btn btn-primary">Send File</a>
         </div>
         <div class="feature">
             <h3>Private Chat</h3>
-            <p>End-to-end encrypted messages that auto-delete.</p>
+            <p>{% if user.role in ['pro', 'premium'] %}End-to-end encrypted messages that auto-delete after 24 hours.{% else %}Upgrade to Pro for private chat.{% endif %}</p>
+            <a href="/chat" class="btn btn-secondary">Messages</a>
+        </div>
+        <div class="feature">
+            <h3>File History</h3>
+            <p>Track sent and received files with status updates.</p>
+            <a href="/history" class="btn btn-secondary">History</a>
+        </div>
+    </div>
+    
+    {% if user.role == 'owner' %}
+    <div class="admin-section">
+        <h3>Admin Panel</h3>
+        <p>Manage users and view system statistics.</p>
+        <a href="/admin" class="btn btn-danger">Admin Panel</a>
+    </div>
+    {% endif %}
+    
+    {% else %}
+    <div class="features">
+        <div class="feature">
+            <h3>File Sharing</h3>
+            <p>Send encrypted files up to 1 GB for free users, up to 10 GB for Premium users.</p>
+        </div>
+        <div class="feature">
+            <h3>Tor Access Only</h3>
+            <p>The service is only accessible via the Tor network. Your IP address is hidden from the server.</p>
+        </div>
+        <div class="feature">
+            <h3>Private Chat</h3>
+            <p>End-to-end encrypted messages that auto-delete after 24 hours. Pro and Premium users have access.</p>
+        </div>
+    </div>
+    
+    <div class="features">
+        <div class="feature">
+            <h3>No Advertisements</h3>
+            <p>Dispatch displays no ads, popups, banners, or sponsored content.</p>
+        </div>
+        <div class="feature">
+            <h3>Open Source</h3>
+            <p>All code is available on GitHub for independent audit.</p>
+        </div>
+        <div class="feature">
+            <h3>Auto-Deletion</h3>
+            <p>Files expire after 7 days. Chat messages delete after 24 hours.</p>
         </div>
     </div>
     
     <div class="cta-buttons">
-        {% if user %}
-            <a href="/send" class="btn btn-primary">Send File</a>
-        {% else %}
-            <a href="/register" class="btn btn-primary">Get Started</a>
-        {% endif %}
+        <a href="/register" class="btn btn-primary">Create Account</a>
+        <a href="/about" class="btn btn-secondary">Learn More</a>
     </div>
+    {% endif %}
 </div>
+
+<style>
+.welcome-message {
+    background: var(--bg-glass);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    text-align: center;
+    border: 1px solid var(--border-light);
+}
+
+.welcome-message h3 {
+    margin-bottom: 0.5rem;
+    color: var(--primary);
+}
+
+.role-badge {
+    display: inline-block;
+    background: var(--gradient-primary);
+    padding: 0.2rem 0.8rem;
+    border-radius: var(--radius-sm);
+    color: white;
+    font-size: 0.9rem;
+}
+
+.admin-section {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: rgba(231, 76, 60, 0.1);
+    border-radius: var(--radius-lg);
+    text-align: center;
+    border: 1px solid var(--danger);
+}
+
+.admin-section h3 {
+    color: var(--danger);
+    margin-bottom: 0.5rem;
+}
+
+.features {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    margin: 2rem 0;
+    flex-wrap: wrap;
+}
+
+.feature {
+    background: var(--bg-glass);
+    padding: 1.5rem;
+    border-radius: var(--radius-lg);
+    max-width: 300px;
+    flex: 1;
+    min-width: 250px;
+    border: 1px solid var(--border-light);
+}
+
+.feature h3 {
+    margin-bottom: 0.75rem;
+    color: var(--primary);
+}
+
+.feature p {
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.cta-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 2rem;
+    flex-wrap: wrap;
+}
+
+.btn {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    text-decoration: none;
+    border-radius: var(--radius-md);
+    font-weight: bold;
+    transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.btn-primary {
+    background: var(--gradient-primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--primary);
+    border: 1px solid var(--border-light);
+}
+
+.btn-secondary:hover {
+    background: var(--primary);
+    color: white;
+}
+
+.btn-danger {
+    background: var(--danger);
+    color: white;
+}
+
+@media (max-width: 768px) {
+    .features {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .feature {
+        max-width: 100%;
+    }
+    
+    .cta-buttons {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .btn {
+        width: 100%;
+        text-align: center;
+    }
+}
+</style>
 {% endblock %}
