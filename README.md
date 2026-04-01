@@ -1,27 +1,31 @@
-# Dispatch - Personal Tor File Sharing Platform
+# Dispatch - Tor File Sharing Platform
 
-This is my personal file sharing and communication platform running as a Tor hidden service. I am sharing the source code for transparency and trust, not as a turnkey solution for others to deploy.
-
-## What This Is
-
-A Tor-only platform where I can:
-- Send and receive encrypted files
-- Chat privately with end-to-end encryption
-- Manage user accounts with roles (Free, Pro, Premium, Owner)
-- Monitor system health and user activity
-
-The platform has no advertisements, popups, or sponsored content.
+I am building Dispatch publicly as I work toward launching a security-focused company. Everything is open source. All code is on GitHub.
 
 ## Important Disclosures
 
-In the interest of transparency, here is how the platform actually works:
+I believe in complete transparency. Here is how Dispatch actually works:
 
-- **File Encryption Keys**: Files are encrypted in the browser with AES-256-GCM. The encryption key is then encrypted with the recipient's password hash and stored on the server. As the server owner, I have access to the encrypted key and the recipient's password hash. Decryption would require both.
+- **File Encryption Keys**: Files are encrypted in your browser with AES-256-GCM. The encryption key is then encrypted with the recipient's password hash and stored on the server. As the server owner, I have access to the encrypted key and the recipient's password hash. Decryption would require both.
 - **IP Logging**: The server logs Tor exit node IP addresses for security purposes (rate limiting, login lockouts, security logs). These are stored for 30 days and automatically deleted. Your real IP never reaches the server because all traffic goes through Tor.
 - **No Perfect Forward Secrecy**: If the server is compromised, stored encrypted keys could potentially be decrypted if user passwords are also compromised.
 - **No Warranty**: This software is provided "as is" without warranties.
 
-## Current Features
+## Where to Find Me
+
+I am building in public. Follow my journey:
+
+| Platform | Link | Content |
+|----------|------|---------|
+| **X (Twitter)** | @dyspatsh | Daily updates, security threads, tech discussions |
+| **YouTube** | /dyspatsh | Tutorials, deep dives, project updates |
+| **TikTok** | @dyspatsh | Quick tips, behind-the-scenes, short-form content |
+| **Instagram** | @dyspatsh | Personal brand, my journey, stories |
+| **Discord** | discord.gg/dispatch | Community chat, support, feedback |
+| **GitHub** | /Dyspatsh/Dispatch | Source code, issues, releases |
+| **LinkedIn** | /in/dyspatsh | Professional network, business updates |
+
+## Features
 
 ### File Sharing
 - AES-256-GCM client-side encryption
@@ -114,14 +118,6 @@ In the interest of transparency, here is how the platform actually works:
 - **Rate Limiting**: SlowAPI
 - **Frontend**: Vanilla JavaScript, HTML5, CSS3
 - **Network**: Tor hidden service (.onion only)
-
-## My Setup
-
-This runs on my own server with:
-- Ubuntu 22.04
-- Python 3.12
-- PostgreSQL 16
-- Tor service
 
 ## License
 
