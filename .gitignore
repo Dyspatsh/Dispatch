@@ -73,3 +73,5 @@ npm-debug.log
 # Logs directory
 /home/dispatch/dyspatch/logs/
 /home/dispatch/dyspatch/backups/
+*.save
+*.save
