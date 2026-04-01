@@ -1,100 +1,132 @@
-# Dispatch - Tor Privacy-Focused File Sharing Platform
+# Dispatch - Personal Tor File Sharing Platform
 
-Dispatch is a Tor-only, privacy-focused file sharing and communication platform where users can send encrypted files, engage in private and group chats, and manage their digital presence with complete anonymity.
+This is my personal file sharing and communication platform running as a Tor hidden service. I am sharing the source code for transparency and trust, not as a turnkey solution for others to deploy.
 
-## Features
+## What This Is
+
+A Tor-only platform where I can:
+- Send and receive encrypted files
+- Chat privately with end-to-end encryption
+- Manage user accounts with roles (Free, Pro, Premium, Owner)
+- Monitor system health and user activity
+
+The platform has no advertisements, popups, or sponsored content.
+
+## Important Disclosures
+
+In the interest of transparency, here is how the platform actually works:
+
+- **File Encryption Keys**: Files are encrypted in the browser with AES-256-GCM. The encryption key is then encrypted with the recipient's password hash and stored on the server. As the server owner, I have access to the encrypted key and the recipient's password hash. Decryption would require both.
+- **IP Logging**: The server logs Tor exit node IP addresses for security purposes (rate limiting, login lockouts, security logs). These are stored for 30 days and automatically deleted. Your real IP never reaches the server because all traffic goes through Tor.
+- **No Perfect Forward Secrecy**: If the server is compromised, stored encrypted keys could potentially be decrypted if user passwords are also compromised.
+- **No Warranty**: This software is provided "as is" without warranties.
+
+## Current Features
 
 ### File Sharing
-- **Client-side AES-256-GCM encryption** - Files encrypted before upload, keys never leave your browser
-- **Drag & drop upload** with queue management and progress bars
-- **Multiple file selection** with individual cancel and retry
-- **File preview** - Thumbnails for images, file-type icons for documents
-- **Custom expiration** (Pro/Premium) - Set files to expire in 1-7 days
-- **Password protection** (Pro/Premium) - Add password to files
-- **Automatic cleanup** - Expired files auto-delete
+- AES-256-GCM client-side encryption
+- Drag and drop upload with queue management
+- File preview for images
+- Custom expiration (Pro/Premium, 1-7 days)
+- Password protection (Pro/Premium)
+- Automatic cleanup of expired files
 
-### Private Chat
-- **End-to-end encrypted messages** - Auto-delete after 24 hours
-- **Read receipts** - Sent, Delivered, Read status (Premium can disable)
-- **Typing indicators** - Real-time typing status
-- **Message search** (Pro+) - Search through conversation history
-- **Message reactions** - [Like], [Thanks], [Agree], [Helpful]
+### Private Chat (Pro and Premium)
+- End-to-end encrypted messages
+- Auto-delete after 24 hours
+- Read receipts (Premium can disable)
+- Typing indicators
+- Message search (Pro+)
 
 ### Group Chats (Premium)
-- **Create groups** with unlimited members
-- **Group management** - Promote members to admin, remove users, edit description
-- **Member list** with role indicators (Owner, Admin, Member)
-- **Leave group** or **delete group** (owner only)
-- **Group invitations** with accept/decline/cancel
+- Create groups with unlimited members
+- Promote members to admin
+- Remove members
+- Edit group description
+- Leave or delete group (owner only)
 
-### Security
-- **Tor-only access** - No IP logging, complete anonymity
-- **Two-factor authentication** (TOTP) with backup codes
-- **Account lockout** - 5 failed attempts = 30-minute lockout
-- **Argon2id password hashing** - Most secure password hashing algorithm
-- **HTTP-only cookies** - Protected against XSS attacks
-- **HTML escaping** - All user input sanitized
-- **Session management** - View and terminate active sessions
+### Security Features
+- Tor-only access (real IP never exposed)
+- Two-factor authentication (TOTP) with backup codes
+- Account lockout: 5 failed logins = 30 minutes, 5 failed 2FA = 15 minutes
+- Argon2id password hashing
+- HTTP-only cookies, CSRF protection
+- HTML escaping for XSS prevention
+- Rate limiting: login (5/min), registration (5/hour), uploads (20/hour), search (10/min)
+- Security headers (CSP, X-Frame-Options, etc.)
+- Session revocation on password change
+- Security logs stored for 30 days
 
-### User Profiles
-- **Bio** (Pro/Premium) - 200 character limit
-- **File statistics** - Files sent/received, storage used, active files
-- **Clickable usernames** - View any user's profile from chat
-- **Join date** and account age display
+### User Profiles (Pro/Premium)
+- Bio (200 character limit)
+- File statistics (sent/received, storage used, active files)
+- Clickable usernames showing profile info
 
 ### Admin Dashboard (Owner only)
-- **Real-time charts** - User growth, file activity, storage by role
-- **System health gauges** - CPU, memory, disk usage
-- **Activity heatmap** - Visual user activity tracking
-- **User management** - Search, filter, ban, unban, role change, delete
-- **Batch actions** - Select multiple users for bulk operations
-- **Data export** - Export users and files to CSV
-- **Failed login monitoring**
+- User growth charts
+- System health monitoring (CPU, memory, disk)
+- Activity heatmap
+- User management (search, filter, ban, unban, role change, delete)
+- Batch actions for multiple users
+- Failed login monitoring
 
 ### Account Management
-- **Theme selection** - Light/Dark mode
-- **Change password and PIN**
-- **Delete account** - Permanent deletion with confirmation
-- **Login history** - Last 30 days of activity
-- **Blocked users** - Manage blocked contacts
-- **2FA management** - Enable/disable with backup codes
+- Light/Dark theme
+- Change password and PIN
+- Delete account (permanent)
+- Login history (30 days)
+- Security logs (30 days)
+- Blocked users list
 
-## Requirements
+## Role Limits
 
-- Ubuntu 22.04/24.04
-- Python 3.12+
-- PostgreSQL 16+
-- Tor
+| Feature | Free | Pro | Premium |
+|---------|------|-----|---------|
+| Max File Size | 1 GB | 5 GB | 10 GB |
+| Concurrent Files | 10 | 50 | 100 |
+| History Retention | 30 days | 60 days | 90 days |
+| Private Chat | No | Yes (100 char) | Yes (200 char) |
+| Group Chats | No | No | Yes |
+| Custom Expiry | No | Yes | Yes |
+| Password Protection | No | Yes | Yes |
+| Bio | No | Yes | Yes |
+| Read Receipts Toggle | No | No | Yes |
+| Subscription Duration | - | 30 days | 30 days |
 
-## Installation
+## Data Retention
 
-```bash
-# Clone the repository
-git clone https://github.com/Dyspatsh/Dispatch.git
-cd Dispatch
+| Data Type | Retention Period |
+|-----------|------------------|
+| Files | Until expiration (7 days default) or manual deletion |
+| Chat Messages | 24 hours |
+| Login History | 30 days |
+| Security Logs | 30 days |
+| Failed Login Attempts | 7 days |
+| Sessions | 7 days of inactivity |
 
-# Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
+## Technology Stack
 
-# Install dependencies
-pip install -r requirements.txt
+- **Backend**: FastAPI (Python) with SQLAlchemy ORM
+- **Database**: PostgreSQL
+- **Encryption**: AES-256-GCM (client-side), Argon2id (password hashing)
+- **Real-time**: WebSockets
+- **Authentication**: HTTP-only cookies, CSRF tokens, TOTP 2FA
+- **Rate Limiting**: SlowAPI
+- **Frontend**: Vanilla JavaScript, HTML5, CSS3
+- **Network**: Tor hidden service (.onion only)
 
-# Copy environment configuration
-cp .env.example .env
-# Edit .env with your database credentials
+## My Setup
 
-# Initialize database
-python3 -c "from database import init_db; init_db()"
+This runs on my own server with:
+- Ubuntu 22.04
+- Python 3.12
+- PostgreSQL 16
+- Tor service
 
-# Configure Tor hidden service
-sudo nano /etc/tor/torrc
-# Add:
-# HiddenServiceDir /var/lib/tor/dispatch/
-# HiddenServicePort 80 127.0.0.1:8000
+## License
 
-# Restart Tor
-sudo systemctl restart tor
+GNU General Public License v3.0
 
-# Run the application
-python3 app.py
+## Contact
+
+dispatsh@proton.me
