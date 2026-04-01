@@ -569,24 +569,6 @@
     }
 }
 
-.group-chat-messages::-webkit-scrollbar {
-    width: 8px;
-}
-
-.group-chat-messages::-webkit-scrollbar-track {
-    background: var(--bg-tertiary);
-    border-radius: 4px;
-}
-
-.group-chat-messages::-webkit-scrollbar-thumb {
-    background: var(--primary);
-    border-radius: 4px;
-}
-
-.group-chat-messages::-webkit-scrollbar-thumb:hover {
-    background: var(--primary-dark);
-}
-
 @media (max-width: 768px) {
     .groups-layout {
         flex-direction: column;
@@ -600,10 +582,6 @@
     
     .group-message {
         max-width: 85%;
-    }
-    
-    .group-chat-messages {
-        max-height: calc(100vh - 300px);
     }
 }
 </style>
@@ -619,6 +597,14 @@ let typingTimeout = null;
 let currentMessageIdForReaction = null;
 let userScrolledUp = false;
 let lastScrollTop = 0;
+let pendingMessages = new Set();
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
 
 function closeGroupsMenuModal() {
     document.getElementById('groupsMenuModal').style.display = 'none';
@@ -683,12 +669,12 @@ document.getElementById('submitCreateGroupBtn')?.addEventListener('click', () =>
     const description = document.getElementById('newGroupDescription').value.trim();
     
     if (!name) {
-        toast.warning('Please enter a group name');
+        if (window.toast) window.toast.warning('Please enter a group name');
         return;
     }
     
     if (name.length < 3) {
-        toast.warning('Group name must be at least 3 characters');
+        if (window.toast) window.toast.warning('Group name must be at least 3 characters');
         return;
     }
     
@@ -707,17 +693,17 @@ document.getElementById('submitCreateGroupBtn')?.addEventListener('click', () =>
     .then(res => res.json())
     .then(data => {
         if (data.success) {
-            toast.success('Group "' + data.name + '" created successfully');
+            if (window.toast) window.toast.success('Group "' + escapeHtml(data.name) + '" created successfully');
             closeCreateModal();
             setTimeout(() => {
                 window.location.reload();
             }, 1000);
         } else {
-            toast.error(data.error || 'Failed to create group');
+            if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to create group'));
         }
     })
     .catch(error => {
-        toast.error('Network error: ' + error.message);
+        if (window.toast) window.toast.error('Network error: ' + escapeHtml(error.message));
     })
     .finally(() => {
         btn.disabled = false;
@@ -730,6 +716,7 @@ function loadGroupChat(groupId) {
     
     currentGroupId = groupId;
     userScrolledUp = false;
+    pendingMessages.clear();
     
     document.querySelectorAll('.group-sidebar-item').forEach(item => {
         if (item.dataset.groupId == groupId) {
@@ -745,7 +732,7 @@ function loadGroupChat(groupId) {
             if (data.success) {
                 renderGroupChat(data);
             } else {
-                toast.error(data.error || 'Failed to load group');
+                if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to load group'));
             }
         });
 }
@@ -784,6 +771,8 @@ function renderGroupChat(data) {
         lastScrollTop = groupMessagesContainer.scrollTop;
     });
     
+    groupMessagesContainer.innerHTML = '';
+    
     data.messages.forEach(msg => {
         addMessageToGroup(msg, data.members);
     });
@@ -809,6 +798,10 @@ function renderGroupChat(data) {
 }
 
 function addMessageToGroup(message, members, isSentByCurrentUser = message.sender_id === {{ user.id }}) {
+    if (message.id && document.querySelector(`.group-message[data-message-id="${message.id}"]`)) {
+        return;
+    }
+    
     const messageDiv = document.createElement('div');
     messageDiv.className = `group-message ${isSentByCurrentUser ? 'group-message-sent' : 'group-message-received'}`;
     messageDiv.setAttribute('data-message-id', message.id);
@@ -875,6 +868,10 @@ function sendGroupMessage() {
     const content = messageInput.value.trim();
     if (!content) return;
     
+    const messageKey = content + Date.now();
+    if (pendingMessages.has(messageKey)) return;
+    pendingMessages.add(messageKey);
+    
     sendBtn.disabled = true;
     
     const tempId = 'temp_' + Date.now();
@@ -897,7 +894,10 @@ function sendGroupMessage() {
             type: 'message',
             content: content
         }));
-        setTimeout(() => { sendBtn.disabled = false; }, 500);
+        setTimeout(() => {
+            sendBtn.disabled = false;
+            pendingMessages.delete(messageKey);
+        }, 500);
     } else {
         const formData = new FormData();
         formData.append('content', content);
@@ -906,6 +906,7 @@ function sendGroupMessage() {
             body: formData
         }).finally(() => {
             sendBtn.disabled = false;
+            pendingMessages.delete(messageKey);
         });
     }
 }
@@ -959,7 +960,10 @@ function connectGroupWebSocket(groupId) {
         const data = JSON.parse(event.data);
         
         if (data.type === 'new_group_message') {
-            addMessageToGroup(data.message, [], false);
+            const existingMessage = document.querySelector(`.group-message[data-message-id="${data.message.id}"]`);
+            if (!existingMessage) {
+                addMessageToGroup(data.message, [], false);
+            }
         } else if (data.type === 'message_reaction') {
             updateReaction(data.message_id, data.user_id, data.reaction_type, data.action);
         } else if (data.type === 'typing') {
@@ -1013,8 +1017,8 @@ function addReaction(messageId, reactionType) {
         method: 'POST',
         body: formData
     }).then(res => res.json()).then(data => {
-        if (!data.success) {
-            toast.error(data.error);
+        if (!data.success && window.toast) {
+            window.toast.error(escapeHtml(data.error));
         }
     });
 }
@@ -1134,10 +1138,10 @@ function showGroupInfoModal(groupId) {
                             body: `user_id=${userId}`
                         }).then(res => res.json()).then(data => {
                             if (data.success) {
-                                toast.success('User promoted to admin');
+                                if (window.toast) window.toast.success('User promoted to admin');
                                 showGroupInfoModal(groupId);
                             } else {
-                                toast.error(data.error);
+                                if (window.toast) window.toast.error(escapeHtml(data.error));
                             }
                         });
                     });
@@ -1153,13 +1157,13 @@ function showGroupInfoModal(groupId) {
                                 body: `user_id=${userId}`
                             }).then(res => res.json()).then(data => {
                                 if (data.success) {
-                                    toast.success('User removed from group');
+                                    if (window.toast) window.toast.success('User removed from group');
                                     showGroupInfoModal(groupId);
                                     if (userId == {{ user.id }}) {
                                         window.location.reload();
                                     }
                                 } else {
-                                    toast.error(data.error);
+                                    if (window.toast) window.toast.error(escapeHtml(data.error));
                                 }
                             });
                         }
@@ -1177,11 +1181,11 @@ function showGroupInfoModal(groupId) {
                                 .then(res => res.json())
                                 .then(data => {
                                     if (data.success) {
-                                        toast.success(data.message);
+                                        if (window.toast) window.toast.success(data.message);
                                         closeGroupInfoModal();
                                         window.location.reload();
                                     } else {
-                                        toast.error(data.error);
+                                        if (window.toast) window.toast.error(escapeHtml(data.error));
                                     }
                                 });
                         }
@@ -1196,11 +1200,11 @@ function showGroupInfoModal(groupId) {
                                 .then(res => res.json())
                                 .then(data => {
                                     if (data.success) {
-                                        toast.success('Group deleted');
+                                        if (window.toast) window.toast.success('Group deleted');
                                         closeGroupInfoModal();
                                         window.location.reload();
                                     } else {
-                                        toast.error(data.error);
+                                        if (window.toast) window.toast.error(escapeHtml(data.error));
                                     }
                                 });
                         }
@@ -1232,14 +1236,14 @@ function openEditBioModal(groupId, currentBio) {
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                toast.success('Description updated');
+                if (window.toast) window.toast.success('Description updated');
                 closeEditBioModal();
             } else {
-                toast.error(data.error || 'Failed to update description');
+                if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to update description'));
             }
         })
         .catch(() => {
-            toast.error('Network error');
+            if (window.toast) window.toast.error('Network error');
         })
         .finally(() => {
             btn.disabled = false;
@@ -1290,7 +1294,7 @@ function openInviteUserModal(groupId) {
     document.getElementById('sendInviteBtn').onclick = () => {
         const username = inviteUsername.value.trim();
         if (!username) {
-            toast.warning('Please enter a username');
+            if (window.toast) window.toast.warning('Please enter a username');
             return;
         }
         
@@ -1308,14 +1312,14 @@ function openInviteUserModal(groupId) {
         .then(res => res.json())
         .then(data => {
             if (data.success) {
-                toast.success(data.message);
+                if (window.toast) window.toast.success(data.message);
                 closeInviteUserModal();
             } else {
-                toast.error(data.error);
+                if (window.toast) window.toast.error(escapeHtml(data.error));
             }
         })
         .catch(() => {
-            toast.error('Network error');
+            if (window.toast) window.toast.error('Network error');
         })
         .finally(() => {
             btn.disabled = false;
@@ -1390,16 +1394,9 @@ function showUserProfile(username) {
                 `;
                 document.body.appendChild(modal);
             } else {
-                toast.error('Could not load user profile');
+                if (window.toast) window.toast.error('Could not load user profile');
             }
         });
-}
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
 }
 
 document.querySelectorAll('.group-sidebar-item').forEach(item => {

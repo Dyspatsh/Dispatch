@@ -17,13 +17,12 @@
                     <th>File Size</th>
                     <th>Date</th>
                     <th>Action</th>
-                </tr>
-            </thead>
+                </thead>
             <tbody>
                 {% for file in pending_files %}
                 <tr data-file-id="{{ file.id }}">
-                    <td>{{ file.sender.username }}</td>
-                    <td>{{ file.filename }}</td>
+                    <td id="sender-{{ file.id }}">{{ file.sender.username }}</td>
+                    <td id="filename-{{ file.id }}">{{ file.filename }}</td>
                     <td>{{ (file.file_size / 1048576)|round(2) }} MB</td>
                     <td>{{ file.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td class="action-buttons">
@@ -42,49 +41,72 @@
 </div>
 
 <script>
-    function acceptAndDownload(fileId) {
-        const button = event.target;
-        const originalText = button.textContent;
-        button.textContent = 'Processing...';
-        button.disabled = true;
-        
-        fetch('/files/accept/' + fileId)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    window.location.href = '/files/download/' + fileId;
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function acceptAndDownload(fileId) {
+    const button = event.target;
+    const originalText = button.textContent;
+    button.textContent = 'Processing...';
+    button.disabled = true;
+    
+    fetch('/files/accept/' + fileId)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                window.location.href = '/files/download/' + fileId;
+            } else {
+                if (window.toast) {
+                    window.toast.error('Error accepting file: ' + escapeHtml(data.error || 'Unknown error'));
                 } else {
                     alert('Error accepting file: ' + (data.error || 'Unknown error'));
-                    button.textContent = originalText;
-                    button.disabled = false;
                 }
-            })
-            .catch(error => {
-                alert('Error processing file: ' + error.message);
                 button.textContent = originalText;
                 button.disabled = false;
-            });
+            }
+        })
+        .catch(error => {
+            if (window.toast) {
+                window.toast.error('Error processing file: ' + escapeHtml(error.message));
+            } else {
+                alert('Error processing file: ' + error.message);
+            }
+            button.textContent = originalText;
+            button.disabled = false;
+        });
+}
+
+function declineFile(fileId) {
+    if (confirm('Decline this file? It will be permanently deleted.')) {
+        window.location.href = '/files/decline/' + fileId;
     }
-    
-    function declineFile(fileId) {
-        if (confirm('Decline this file? It will be permanently deleted.')) {
-            window.location.href = '/files/decline/' + fileId;
-        }
-    }
-    
-    function blockSender(userId, username) {
-        if (confirm('Block ' + username + '? You will no longer receive files or chat invitations from this user.')) {
-            fetch('/chat/block/' + userId, { method: 'POST' })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
+}
+
+function blockSender(userId, username) {
+    if (confirm('Block ' + escapeHtml(username) + '? You will no longer receive files or chat invitations from this user.')) {
+        fetch('/chat/block/' + userId, { method: 'POST' })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    if (window.toast) {
+                        window.toast.success('User blocked successfully');
+                    } else {
                         alert('User blocked successfully');
-                        location.reload();
+                    }
+                    location.reload();
+                } else {
+                    if (window.toast) {
+                        window.toast.error('Error: ' + escapeHtml(data.error || 'Failed to block user'));
                     } else {
                         alert('Error: ' + (data.error || 'Failed to block user'));
                     }
-                });
-        }
+                }
+            });
     }
+}
 </script>
 {% endblock %}

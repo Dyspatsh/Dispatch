@@ -30,8 +30,8 @@
                 <tbody>
                     {% for file in received_files %}
                     <tr>
-                        <td>{{ file.sender.username }}</td>
-                        <td>{{ file.filename }}</td>
+                        <td id="sender-{{ file.id }}">{{ file.sender.username }}</td>
+                        <td id="filename-{{ file.id }}">{{ file.filename }}</td>
                         <td><span class="file-size">{% if file.file_size < 1024 %}{{ file.file_size }} B{% elif file.file_size < 1048576 %}{{ (file.file_size / 1024)|round(1) }} KB{% else %}{{ (file.file_size / 1048576)|round(1) }} MB{% endif %}</span></td>
                         <td><span class="status status-{{ file.status }}">{{ file.status|capitalize }}</span></td>
                         <td>{{ file.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
@@ -75,8 +75,8 @@
                 <tbody>
                     {% for file in sent_files %}
                     <tr>
-                        <td>{{ file.recipient.username }}</td>
-                        <td>{{ file.filename }}</td>
+                        <td id="recipient-{{ file.id }}">{{ file.recipient.username }}</td>
+                        <td id="filename-{{ file.id }}">{{ file.filename }}</td>
                         <td><span class="file-size">{% if file.file_size < 1024 %}{{ file.file_size }} B{% elif file.file_size < 1048576 %}{{ (file.file_size / 1024)|round(1) }} KB{% else %}{{ (file.file_size / 1048576)|round(1) }} MB{% endif %}</span></td>
                         <td><span class="status status-{{ file.status }}">{{ file.status|capitalize }}</span></td>
                         <td>{{ file.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
@@ -165,66 +165,73 @@ body.dark .history-tab-btn.active {
 </style>
 
 <script>
-    function showReceived() {
-        const receivedSection = document.getElementById('received-section');
-        const sentSection = document.getElementById('sent-section');
-        const receivedBtn = document.getElementById('receivedBtn');
-        const sentBtn = document.getElementById('sentBtn');
-        
-        receivedSection.classList.add('active');
-        sentSection.classList.remove('active');
-        receivedBtn.classList.add('active');
-        sentBtn.classList.remove('active');
-    }
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showReceived() {
+    const receivedSection = document.getElementById('received-section');
+    const sentSection = document.getElementById('sent-section');
+    const receivedBtn = document.getElementById('receivedBtn');
+    const sentBtn = document.getElementById('sentBtn');
     
-    function showSent() {
-        const receivedSection = document.getElementById('received-section');
-        const sentSection = document.getElementById('sent-section');
-        const receivedBtn = document.getElementById('receivedBtn');
-        const sentBtn = document.getElementById('sentBtn');
-        
-        receivedSection.classList.remove('active');
-        sentSection.classList.add('active');
-        receivedBtn.classList.remove('active');
-        sentBtn.classList.add('active');
-    }
+    receivedSection.classList.add('active');
+    sentSection.classList.remove('active');
+    receivedBtn.classList.add('active');
+    sentBtn.classList.remove('active');
+}
+
+function showSent() {
+    const receivedSection = document.getElementById('received-section');
+    const sentSection = document.getElementById('sent-section');
+    const receivedBtn = document.getElementById('receivedBtn');
+    const sentBtn = document.getElementById('sentBtn');
     
-    function updateExpiryTimers() {
-        const expirySpans = document.querySelectorAll('.expiry-timer');
-        const now = new Date();
+    receivedSection.classList.remove('active');
+    sentSection.classList.add('active');
+    receivedBtn.classList.remove('active');
+    sentBtn.classList.add('active');
+}
+
+function updateExpiryTimers() {
+    const expirySpans = document.querySelectorAll('.expiry-timer');
+    const now = new Date();
+    
+    expirySpans.forEach(span => {
+        const expiryTime = new Date(span.dataset.expires);
+        const diff = expiryTime - now;
         
-        expirySpans.forEach(span => {
-            const expiryTime = new Date(span.dataset.expires);
-            const diff = expiryTime - now;
+        if (diff <= 0) {
+            span.textContent = 'Expired';
+            span.classList.add('expiry-timer-expired');
+            span.classList.remove('expiry-timer-warning');
+        } else {
+            const hours = Math.floor(diff / 3600000);
+            const minutes = Math.floor((diff % 3600000) / 60000);
             
-            if (diff <= 0) {
-                span.textContent = 'Expired';
-                span.classList.add('expiry-timer-expired');
-                span.classList.remove('expiry-timer-warning');
-            } else {
-                const hours = Math.floor(diff / 3600000);
-                const minutes = Math.floor((diff % 3600000) / 60000);
-                
-                if (hours > 0) {
-                    span.textContent = `${hours}h ${minutes}m`;
-                    if (hours < 24) {
-                        span.classList.add('expiry-timer-warning');
-                    } else {
-                        span.classList.remove('expiry-timer-warning');
-                    }
-                } else if (minutes > 0) {
-                    span.textContent = `${minutes}m`;
+            if (hours > 0) {
+                span.textContent = `${hours}h ${minutes}m`;
+                if (hours < 24) {
                     span.classList.add('expiry-timer-warning');
                 } else {
-                    span.textContent = 'Less than 1 minute';
-                    span.classList.add('expiry-timer-warning');
+                    span.classList.remove('expiry-timer-warning');
                 }
-                span.classList.remove('expiry-timer-expired');
+            } else if (minutes > 0) {
+                span.textContent = `${minutes}m`;
+                span.classList.add('expiry-timer-warning');
+            } else {
+                span.textContent = 'Less than 1 minute';
+                span.classList.add('expiry-timer-warning');
             }
-        });
-    }
-    
-    updateExpiryTimers();
-    setInterval(updateExpiryTimers, 60000);
+            span.classList.remove('expiry-timer-expired');
+        }
+    });
+}
+
+updateExpiryTimers();
+setInterval(updateExpiryTimers, 60000);
 </script>
 {% endblock %}

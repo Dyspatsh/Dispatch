@@ -7,10 +7,12 @@
     <h1>Login</h1>
     
     {% if error %}
-    <div class="error">{{ error }}</div>
+    <div class="error-message" style="background: rgba(231, 76, 60, 0.1); color: #e74c3c; padding: 0.75rem; border-radius: 8px; margin-bottom: 1rem;">
+        {{ error }}
+    </div>
     {% endif %}
     
-    <form method="post">
+    <form method="post" action="/login">
         <div class="form-group">
             <label for="username">Username</label>
             <input type="text" id="username" name="username" required minlength="3" maxlength="16" pattern="[a-zA-Z0-9_]+">
@@ -34,4 +36,25 @@
     <p>Don't have an account? <a href="/register">Register</a></p>
     <p><a href="/recovery">Forgot your account?</a></p>
 </div>
+
+<script>
+    // Convert any error messages to toast notifications
+    document.addEventListener('DOMContentLoaded', function() {
+        const errorDiv = document.querySelector('.error-message');
+        if (errorDiv && window.toast) {
+            const errorText = errorDiv.textContent.trim();
+            if (errorText) {
+                window.toast.error(errorText);
+                errorDiv.style.display = 'none';
+            }
+        }
+        
+        // Also check for success messages from URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const successMsg = urlParams.get('success');
+        if (successMsg && window.toast) {
+            window.toast.success(successMsg);
+        }
+    });
+</script>
 {% endblock %}

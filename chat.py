@@ -129,6 +129,30 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # ============================================
+# READ RECEIPTS SETTINGS
+# ============================================
+
+@router.post("/settings/read_receipts")
+async def update_read_receipts_setting(
+    enabled: bool = Form(...),
+    session_token: str = Cookie(None),
+    db: Session = Depends(get_db)
+):
+    """Update read receipts setting for the user (affects both private and group chats)"""
+    user = get_current_user(db, session_token)
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    # Check if user is Premium (only Premium users can disable read receipts)
+    if not enabled and user.role not in ["premium", "owner"]:
+        return {"success": False, "error": "Read receipts can only be disabled by Premium users"}
+    
+    user.read_receipts_enabled = enabled
+    db.commit()
+    
+    return {"success": True, "message": f"Read receipts {'enabled' if enabled else 'disabled'}"}
+
+# ============================================
 # STATIC ROUTES (No parameters - must come FIRST)
 # ============================================
 
@@ -251,7 +275,8 @@ async def get_group_data(group_id: int, session_token: str = Cookie(None), db: S
             "created_at": msg.created_at.isoformat(),
             "expires_at": msg.expires_at.isoformat(),
             "read_count": read_count,
-            "member_count": len(members_list)
+            "member_count": len(members_list),
+            "reactions": []
         })
     
     return {
@@ -476,6 +501,10 @@ async def mark_group_message_read(
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
+    
+    # Only mark as read if the user has read receipts enabled
+    if not user.read_receipts_enabled:
+        return {"success": True}
     
     message = db.query(GroupChatMessage).filter(GroupChatMessage.id == message_id).first()
     if not message:
@@ -802,6 +831,10 @@ async def mark_message_read(message_id: int, session_token: str = Cookie(None), 
     if not user:
         return {"success": False, "error": "Not authenticated"}
     
+    # Only mark as read if the user has read receipts enabled
+    if not user.read_receipts_enabled:
+        return {"success": True}
+    
     message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
     if not message:
         return {"success": False, "error": "Message not found"}
@@ -820,37 +853,6 @@ async def mark_message_read(message_id: int, session_token: str = Cookie(None), 
             })
     
     return {"success": True}
-
-@router.get("/search")
-async def search_messages(
-    q: str,
-    conversation_id: int,
-    session_token: str = Cookie(None),
-    db: Session = Depends(get_db)
-):
-    user = get_current_user(db, session_token)
-    if not user:
-        return {"success": False, "error": "Not authenticated"}
-    
-    if user.role not in ['pro', 'premium', 'owner']:
-        return {"success": False, "error": "Message search requires Pro or Premium subscription"}
-    
-    q = escape_html(q)
-    messages = db.query(ChatMessage).filter(
-        ChatMessage.conversation_id == conversation_id,
-        ChatMessage.encrypted_content.ilike(f"%{q}%")
-    ).order_by(ChatMessage.created_at).all()
-    
-    results = []
-    for msg in messages:
-        results.append({
-            "id": msg.id,
-            "content": msg.encrypted_content,
-            "sender": msg.sender.username,
-            "created_at": msg.created_at.isoformat()
-        })
-    
-    return {"success": True, "results": results}
 
 # ============================================
 # PRIVATE CHAT INVITATION ROUTES

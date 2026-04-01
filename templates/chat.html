@@ -74,9 +74,6 @@
         {% if not blocked_by_other and not blocked_other %}
         <div class="chat-input-area">
             <div class="message-tools">
-                {% if user.role in ['pro', 'premium', 'owner'] %}
-                <button id="searchBtn" class="btn btn-secondary btn-small">Search</button>
-                {% endif %}
                 <span class="char-counter" id="charCounter">0 / <span id="maxChars">{{ '100' if user.role == 'pro' else '200' if user.role == 'premium' else 'Unlimited' }}</span></span>
             </div>
             <textarea id="messageInput" placeholder="Type your message..." maxlength="{% if user.role == 'pro' %}100{% elif user.role == 'premium' %}200{% else %}999999{% endif %}" rows="3"></textarea>
@@ -87,24 +84,6 @@
             <p>Messaging is disabled for this conversation.</p>
         </div>
         {% endif %}
-    </div>
-</div>
-
-<div id="searchModal" class="modal" style="display: none;">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3>Search Messages</h3>
-            <button class="modal-close" onclick="closeSearchModal()">[X]</button>
-        </div>
-        <div class="modal-body">
-            <div class="form-group">
-                <input type="text" id="searchQuery" placeholder="Enter keyword..." class="search-input">
-                <div id="searchResults" class="search-results"></div>
-            </div>
-        </div>
-        <div class="modal-footer">
-            <button class="btn-secondary" onclick="closeSearchModal()">Close</button>
-        </div>
     </div>
 </div>
 
@@ -142,6 +121,11 @@
     padding: 1rem;
 }
 
+.chat-sidebar h3 {
+    margin-bottom: 1rem;
+    font-size: 1rem;
+}
+
 .chat-main {
     flex: 1;
     display: flex;
@@ -168,6 +152,7 @@
     display: flex;
     align-items: center;
     gap: 1rem;
+    flex-wrap: wrap;
 }
 
 .chat-header-info h2 {
@@ -282,7 +267,7 @@
 .message-tools {
     display: flex;
     gap: 0.5rem;
-    justify-content: space-between;
+    justify-content: flex-end;
     margin-bottom: 0.5rem;
 }
 
@@ -340,7 +325,7 @@
     margin: 10% auto;
     border-radius: var(--radius-lg);
     width: 90%;
-    max-width: 500px;
+    max-width: 350px;
     border: 1px solid var(--border-light);
 }
 
@@ -379,47 +364,6 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.75rem;
-}
-
-.search-input {
-    width: 100%;
-    padding: 0.75rem;
-    border: 2px solid var(--border-light);
-    border-radius: var(--radius-md);
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    margin-bottom: 1rem;
-}
-
-.search-results {
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-.search-result-item {
-    padding: 0.75rem;
-    border-bottom: 1px solid var(--border-light);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.search-result-item:hover {
-    background: var(--bg-tertiary);
-}
-
-.result-sender {
-    font-weight: bold;
-    font-size: 0.8rem;
-}
-
-.result-content {
-    font-size: 0.9rem;
-    margin: 0.25rem 0;
-}
-
-.result-time {
-    font-size: 0.7rem;
-    color: var(--text-muted);
 }
 
 .reaction-options {
@@ -681,7 +625,7 @@ function sendMessage() {
     const content = messageInput.value.trim();
     if (!content) return;
     if (content.length > maxChars && maxChars !== 999999) {
-        toast.error('Message exceeds character limit');
+        if (window.toast) window.toast.error('Message exceeds character limit');
         return;
     }
     
@@ -715,13 +659,13 @@ function sendMessage() {
                     if (statusSpan) statusSpan.textContent = 'Sent';
                 }
             } else {
-                toast.error('Error: ' + data.error);
+                if (window.toast) window.toast.error('Error: ' + escapeHtml(data.error));
                 const tempDiv = document.querySelector('.message[data-message-id="temp"]');
                 if (tempDiv) tempDiv.remove();
             }
         })
         .catch(err => {
-            toast.error('Error sending message: ' + err.message);
+            if (window.toast) window.toast.error('Error sending message: ' + escapeHtml(err.message));
             const tempDiv = document.querySelector('.message[data-message-id="temp"]');
             if (tempDiv) tempDiv.remove();
         });
@@ -734,10 +678,10 @@ function blockUser() {
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    toast.success('User blocked successfully');
+                    if (window.toast) window.toast.success('User blocked successfully');
                     location.reload();
                 } else {
-                    toast.error(data.error || 'Failed to block user');
+                    if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to block user'));
                 }
             });
     }
@@ -749,10 +693,10 @@ function unblockUser() {
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    toast.success('User unblocked successfully');
+                    if (window.toast) window.toast.success('User unblocked successfully');
                     location.reload();
                 } else {
-                    toast.error(data.error || 'Failed to unblock user');
+                    if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to unblock user'));
                 }
             });
     }
@@ -777,7 +721,7 @@ function closeReactionModal() {
 }
 
 function addReaction(messageId, reactionType) {
-    toast.info('Reactions coming soon for private chats');
+    if (window.toast) window.toast.info('Reactions coming soon for private chats');
     closeReactionModal();
 }
 
@@ -797,59 +741,6 @@ function updateExpiryTimers() {
         }
     });
 }
-
-const searchBtn = document.getElementById('searchBtn');
-if (searchBtn) {
-    searchBtn.addEventListener('click', () => {
-        document.getElementById('searchModal').style.display = 'block';
-    });
-}
-
-function closeSearchModal() {
-    document.getElementById('searchModal').style.display = 'none';
-    document.getElementById('searchQuery').value = '';
-    document.getElementById('searchResults').innerHTML = '';
-}
-
-document.getElementById('searchQuery')?.addEventListener('input', (e) => {
-    const query = e.target.value.trim();
-    if (query.length < 2) {
-        document.getElementById('searchResults').innerHTML = '';
-        return;
-    }
-    
-    fetch(`/chat/search?q=${encodeURIComponent(query)}&conversation_id=${conversationId}`)
-        .then(res => res.json())
-        .then(data => {
-            if (data.success && data.results.length > 0) {
-                const resultsHtml = data.results.map(msg => `
-                    <div class="search-result-item" data-message-id="${msg.id}">
-                        <div class="result-sender">${escapeHtml(msg.sender)}</div>
-                        <div class="result-content">${escapeHtml(msg.content)}</div>
-                        <div class="result-time">${new Date(msg.created_at).toLocaleString()}</div>
-                    </div>
-                `).join('');
-                document.getElementById('searchResults').innerHTML = resultsHtml;
-                
-                document.querySelectorAll('.search-result-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const messageId = item.dataset.messageId;
-                        const messageDiv = document.querySelector(`.message[data-message-id="${messageId}"]`);
-                        if (messageDiv) {
-                            messageDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            messageDiv.style.backgroundColor = 'var(--warning-light)';
-                            setTimeout(() => {
-                                messageDiv.style.backgroundColor = '';
-                            }, 2000);
-                            closeSearchModal();
-                        }
-                    });
-                });
-            } else {
-                document.getElementById('searchResults').innerHTML = '<div class="search-no-result">No messages found</div>';
-            }
-        });
-});
 
 function showUserProfile(username) {
     fetch(`/api/user/${encodeURIComponent(username)}`)
@@ -917,7 +808,7 @@ function showUserProfile(username) {
                 `;
                 document.body.appendChild(modal);
             } else {
-                toast.error('Could not load user profile');
+                if (window.toast) window.toast.error('Could not load user profile');
             }
         });
 }

@@ -278,26 +278,45 @@ async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
 @app.post("/register")
-async def register(request: Request, username: str = Form(...), password: str = Form(...), pin: str = Form(...), terms: bool = Form(False), db: Session = Depends(get_db)):
+async def register(
+    request: Request, 
+    username: str = Form(...), 
+    password: str = Form(...), 
+    pin: str = Form(...), 
+    terms: bool = Form(False), 
+    db: Session = Depends(get_db)
+):
     username = escape_html(username)
     
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    
     if not terms:
+        if is_ajax:
+            return {"success": False, "error": "You must accept the Terms of Service"}
         return templates.TemplateResponse("register.html", {"request": request, "error": "You must accept the Terms of Service"})
     
     valid, error = validate_username(username)
     if not valid:
+        if is_ajax:
+            return {"success": False, "error": error}
         return templates.TemplateResponse("register.html", {"request": request, "error": error})
     
     valid, error = validate_password(password)
     if not valid:
+        if is_ajax:
+            return {"success": False, "error": error}
         return templates.TemplateResponse("register.html", {"request": request, "error": error})
     
     valid, error = validate_pin(pin)
     if not valid:
+        if is_ajax:
+            return {"success": False, "error": error}
         return templates.TemplateResponse("register.html", {"request": request, "error": error})
     
     existing_user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
     if existing_user:
+        if is_ajax:
+            return {"success": False, "error": "Username already exists"}
         return templates.TemplateResponse("register.html", {"request": request, "error": "Username already exists"})
     
     recovery_phrase = generate_recovery_phrase()
@@ -309,12 +328,16 @@ async def register(request: Request, username: str = Form(...), password: str = 
         password_hash=hash_password(password),
         pin_hash=hash_password(pin),
         recovery_phrase_hash=hash_password(recovery_phrase),
-        role=role
+        role=role,
+        read_receipts_enabled=True
     )
     
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
+    
+    if is_ajax:
+        return {"success": True, "message": "Account created!", "recovery_phrase": recovery_phrase}
     
     return templates.TemplateResponse("register.html", {"request": request, "success": "Account created!", "recovery_phrase": recovery_phrase})
 
@@ -323,27 +346,46 @@ async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...), pin: str = Form(...), db: Session = Depends(get_db)):
+async def login(
+    request: Request, 
+    username: str = Form(...), 
+    password: str = Form(...), 
+    pin: str = Form(...), 
+    db: Session = Depends(get_db)
+):
     username = escape_html(username)
+    
+    # Check if request wants JSON response (AJAX)
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     
     locked, message = check_login_lockout(username)
     if locked:
+        if is_ajax:
+            return {"success": False, "error": message}
         return templates.TemplateResponse("login.html", {"request": request, "error": message})
     
     user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
     if not user:
         record_failed_login(username)
+        if is_ajax:
+            return {"success": False, "error": "Invalid credentials"}
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
     
     if not verify_password(password, user.password_hash):
         record_failed_login(username)
+        if is_ajax:
+            return {"success": False, "error": "Invalid credentials"}
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
     
     if not verify_password(pin, user.pin_hash):
         record_failed_login(username)
+        if is_ajax:
+            return {"success": False, "error": "Invalid credentials"}
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
     
     if user.is_banned:
+        if is_ajax:
+            return {"success": False, "error": f"Account banned: {user.ban_reason}"}
         return templates.TemplateResponse("login.html", {"request": request, "error": f"Account banned: {user.ban_reason}"})
     
     reset_login_attempts(username)
@@ -354,6 +396,8 @@ async def login(request: Request, username: str = Form(...), password: str = For
     
     if user.totp_enabled:
         session_token = create_session(db, user.id, twofa_verified=False)
+        if is_ajax:
+            return {"success": True, "redirect": "/2fa-verify", "twofa": True}
         response = RedirectResponse(url="/2fa-verify", status_code=303)
         response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False, samesite="lax", max_age=300)
         db.commit()
@@ -362,6 +406,10 @@ async def login(request: Request, username: str = Form(...), password: str = For
     user.last_login = datetime.utcnow()
     db.commit()
     session_token = create_session(db, user.id, twofa_verified=True)
+    
+    if is_ajax:
+        return {"success": True, "redirect": "/home"}
+    
     response = RedirectResponse(url="/home", status_code=303)
     response.set_cookie(key="session_token", value=session_token, httponly=True, secure=False, samesite="lax", max_age=604800)
     return response
@@ -531,6 +579,26 @@ async def change_theme(theme: str = Form(...), user = Depends(get_user_from_sess
         user.theme = theme
         db.commit()
     return {"success": True}
+
+@app.post("/profile/read-receipts")
+async def update_read_receipts(
+    request: Request,
+    enabled: bool = Form(...),
+    user = Depends(get_user_from_session),
+    db: Session = Depends(get_db)
+):
+    """Update read receipts setting for the user"""
+    if not user:
+        return {"success": False, "error": "Not authenticated"}
+    
+    # Check if user is Premium (only Premium users can disable read receipts)
+    if not enabled and user.role not in ["premium", "owner"]:
+        return {"success": False, "error": "Read receipts can only be disabled by Premium users"}
+    
+    user.read_receipts_enabled = enabled
+    db.commit()
+    
+    return {"success": True, "message": f"Read receipts {'enabled' if enabled else 'disabled'}"}
 
 @app.get("/send", response_class=HTMLResponse)
 async def send_page(request: Request, user = Depends(get_user_from_session)):

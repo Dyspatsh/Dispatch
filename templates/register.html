@@ -6,20 +6,7 @@
 <div class="form-container">
     <h1>Register</h1>
     
-    {% if error %}
-    <div class="error">{{ error }}</div>
-    {% endif %}
-    
-    {% if success %}
-    <div class="success">
-        <p>{{ success }}</p>
-        <p><strong>Your Recovery Phrase:</strong></p>
-        <div class="recovery-phrase">{{ recovery_phrase }}</div>
-        <p class="warning">Save this recovery phrase! You will need it to recover your account.</p>
-        <a href="/login" class="btn btn-primary">Go to Login</a>
-    </div>
-    {% else %}
-    <form method="post" id="registerForm">
+    <form id="registerForm" method="post">
         <div class="form-group">
             <label for="username">Username</label>
             <input type="text" id="username" name="username" required minlength="3" maxlength="16" pattern="[a-zA-Z0-9_]+">
@@ -61,116 +48,162 @@
         <button type="submit" class="btn btn-primary">Register</button>
     </form>
     <p>Already have an account? <a href="/login">Login</a></p>
-    {% endif %}
 </div>
 
 <script>
-    (function() {
-        const form = document.getElementById('registerForm');
-        if (!form) return;
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    function showValidationMessage(input, message, isError) {
+        let existingMsg = input.parentElement.querySelector('.validation-message');
+        if (existingMsg) existingMsg.remove();
         
-        const passwordField = document.getElementById('password');
-        const confirmPasswordField = document.getElementById('confirm_password');
-        const pinField = document.getElementById('pin');
-        const confirmPinField = document.getElementById('confirm_pin');
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'validation-message ' + (isError ? 'validation-error' : 'validation-success');
+        msgDiv.textContent = escapeHtml(message);
+        input.parentElement.appendChild(msgDiv);
         
-        function sanitizeInput(str) {
-            if (!str) return '';
-            return str.replace(/[&<>]/g, function(m) {
-                if (m === '&') return '&amp;';
-                if (m === '<') return '&lt;';
-                if (m === '>') return '&gt;';
-                return m;
-            });
+        if (isError) {
+            input.classList.add('error');
+            input.classList.remove('success');
+        } else {
+            input.classList.add('success');
+            input.classList.remove('error');
         }
         
-        function showValidationMessage(input, message, isError) {
-            let existingMsg = input.parentElement.querySelector('.validation-message');
-            if (existingMsg) existingMsg.remove();
-            
-            const msgDiv = document.createElement('div');
-            msgDiv.className = 'validation-message ' + (isError ? 'validation-error' : 'validation-success');
-            msgDiv.textContent = sanitizeInput(message);
-            input.parentElement.appendChild(msgDiv);
-            
-            if (isError) {
-                input.classList.add('error');
-                input.classList.remove('success');
+        setTimeout(() => {
+            if (msgDiv.parentNode) msgDiv.remove();
+            input.classList.remove('error', 'success');
+        }, 3000);
+    }
+    
+    const form = document.getElementById('registerForm');
+    const passwordField = document.getElementById('password');
+    const confirmPasswordField = document.getElementById('confirm_password');
+    const pinField = document.getElementById('pin');
+    const confirmPinField = document.getElementById('confirm_pin');
+    
+    function validatePasswords() {
+        const password = passwordField.value;
+        const confirm = confirmPasswordField.value;
+        
+        if (confirm.length === 0) return true;
+        
+        if (password !== confirm) {
+            showValidationMessage(confirmPasswordField, 'Passwords do not match', true);
+            return false;
+        } else {
+            showValidationMessage(confirmPasswordField, 'Passwords match', false);
+            return true;
+        }
+    }
+    
+    function validatePins() {
+        const pin = pinField.value;
+        const confirm = confirmPinField.value;
+        
+        if (confirm.length === 0) return true;
+        
+        if (pin !== confirm) {
+            showValidationMessage(confirmPinField, 'PINs do not match', true);
+            return false;
+        } else {
+            showValidationMessage(confirmPinField, 'PINs match', false);
+            return true;
+        }
+    }
+    
+    passwordField.addEventListener('input', validatePasswords);
+    confirmPasswordField.addEventListener('input', validatePasswords);
+    pinField.addEventListener('input', validatePins);
+    confirmPinField.addEventListener('input', validatePins);
+    
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        let hasError = false;
+        
+        const password = passwordField.value;
+        const confirmPassword = confirmPasswordField.value;
+        const pin = pinField.value;
+        const confirmPin = confirmPinField.value;
+        
+        if (password !== confirmPassword) {
+            showValidationMessage(confirmPasswordField, 'Passwords do not match', true);
+            hasError = true;
+        }
+        
+        if (pin !== confirmPin) {
+            showValidationMessage(confirmPinField, 'PINs do not match', true);
+            hasError = true;
+        }
+        
+        const termsCheckbox = form.querySelector('input[name="terms"]');
+        if (!termsCheckbox.checked) {
+            if (window.toast) {
+                window.toast.warning('You must accept the Terms of Service');
             } else {
-                input.classList.add('success');
-                input.classList.remove('error');
+                alert('You must accept the Terms of Service');
             }
-            
-            setTimeout(() => {
-                if (msgDiv.parentNode) msgDiv.remove();
-                input.classList.remove('error', 'success');
-            }, 3000);
+            hasError = true;
         }
         
-        function validatePasswords() {
-            const password = passwordField.value;
-            const confirm = confirmPasswordField.value;
-            
-            if (confirm.length === 0) return true;
-            
-            if (password !== confirm) {
-                showValidationMessage(confirmPasswordField, 'Passwords do not match', true);
-                return false;
-            } else {
-                showValidationMessage(confirmPasswordField, 'Passwords match', false);
-                return true;
-            }
-        }
+        if (hasError) return;
         
-        function validatePins() {
-            const pin = pinField.value;
-            const confirm = confirmPinField.value;
-            
-            if (confirm.length === 0) return true;
-            
-            if (pin !== confirm) {
-                showValidationMessage(confirmPinField, 'PINs do not match', true);
-                return false;
-            } else {
-                showValidationMessage(confirmPinField, 'PINs match', false);
-                return true;
-            }
-        }
+        const username = document.getElementById('username').value;
         
-        passwordField.addEventListener('input', validatePasswords);
-        confirmPasswordField.addEventListener('input', validatePasswords);
-        pinField.addEventListener('input', validatePins);
-        confirmPinField.addEventListener('input', validatePins);
+        const formData = new FormData();
+        formData.append('username', username);
+        formData.append('password', password);
+        formData.append('pin', pin);
+        formData.append('terms', true);
         
-        form.addEventListener('submit', function(e) {
-            let hasError = false;
-            
-            const password = passwordField.value;
-            const confirmPassword = confirmPasswordField.value;
-            const pin = pinField.value;
-            const confirmPin = confirmPinField.value;
-            
-            if (password !== confirmPassword) {
-                e.preventDefault();
-                showValidationMessage(confirmPasswordField, 'Passwords do not match', true);
-                hasError = true;
-            }
-            
-            if (pin !== confirmPin) {
-                e.preventDefault();
-                showValidationMessage(confirmPinField, 'PINs do not match', true);
-                hasError = true;
-            }
-            
-            if (!hasError) {
-                const termsCheckbox = form.querySelector('input[name="terms"]');
-                if (!termsCheckbox.checked) {
-                    e.preventDefault();
-                    alert('You must accept the Terms of Service');
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Creating account...';
+        
+        try {
+            const response = await fetch('/register', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
                 }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                if (window.toast) {
+                    window.toast.success('Account created successfully!');
+                }
+                // Show recovery phrase in a modal or redirect to success page
+                alert('Account created!\n\nYour Recovery Phrase:\n' + data.recovery_phrase + '\n\nSAVE THIS PHRASE! You will need it to recover your account.');
+                window.location.href = '/login';
+            } else {
+                if (window.toast) {
+                    window.toast.error(escapeHtml(data.error));
+                } else {
+                    alert(data.error);
+                }
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
             }
-        });
-    })();
+        } catch (error) {
+            if (window.toast) {
+                window.toast.error('Network error: ' + escapeHtml(error.message));
+            } else {
+                alert('Network error: ' + error.message);
+            }
+            submitBtn.disabled = false;
+            submitBtn.textContent = originalText;
+        }
+    });
 </script>
 
 <style>
@@ -291,7 +324,6 @@ body.dark .recovery-phrase {
     opacity: 0.8;
 }
 
-/* Dark theme adjustments */
 body.dark .checkbox-custom {
     background: var(--bg-tertiary);
     border-color: var(--border-medium);

@@ -12,6 +12,7 @@
             <div class="search-wrapper">
                 <input type="text" id="searchUser" placeholder="Enter username to invite...">
                 <button id="inviteBtn" class="btn btn-primary">Invite</button>
+                <button id="globalMessagesSearchBtn" class="btn btn-secondary">Search All Chats</button>
             </div>
             <div id="searchResult" class="search-result"></div>
         </div>
@@ -168,6 +169,25 @@
     </div>
 </div>
 
+<!-- Global Private Chat Search Modal -->
+<div id="globalMessagesSearchModal" class="modal" style="display: none;">
+    <div class="modal-content modal-large">
+        <div class="modal-header">
+            <h3>Search Across All Private Chats</h3>
+            <button class="modal-close" onclick="closeGlobalMessagesSearchModal()">[X]</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <input type="text" id="globalMessagesSearchQuery" placeholder="Enter keyword to search all chats..." class="search-input">
+                <div id="globalMessagesSearchResults" class="search-results"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn-secondary" onclick="closeGlobalMessagesSearchModal()">Close</button>
+        </div>
+    </div>
+</div>
+
 <style>
 .messages-container {
     max-width: 800px;
@@ -186,6 +206,7 @@
 .search-wrapper {
     display: flex;
     gap: 1rem;
+    flex-wrap: wrap;
 }
 
 .search-wrapper input {
@@ -400,8 +421,12 @@
     margin: 10% auto;
     border-radius: var(--radius-lg);
     width: 90%;
-    max-width: 450px;
+    max-width: 500px;
     border: 1px solid var(--border-light);
+}
+
+.modal-large {
+    max-width: 600px;
 }
 
 .modal-header {
@@ -437,6 +462,60 @@
     gap: 0.75rem;
 }
 
+.search-input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 2px solid var(--border-light);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+}
+
+.search-results {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.search-result-item {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.search-result-item:hover {
+    background: var(--bg-tertiary);
+}
+
+.result-other-user {
+    font-weight: bold;
+    font-size: 0.8rem;
+    color: var(--primary);
+    margin-bottom: 0.25rem;
+}
+
+.result-sender {
+    font-weight: bold;
+    font-size: 0.8rem;
+}
+
+.result-content {
+    font-size: 0.9rem;
+    margin: 0.25rem 0;
+}
+
+.result-time {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.search-no-result {
+    text-align: center;
+    padding: 1rem;
+    color: var(--text-muted);
+}
+
 .btn-small {
     padding: 0.4rem 0.8rem;
     font-size: 0.75rem;
@@ -466,6 +545,71 @@
 </style>
 
 <script>
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Global Private Chat Search
+const globalMessagesSearchBtn = document.getElementById('globalMessagesSearchBtn');
+let globalMessagesDebounceTimer = null;
+
+if (globalMessagesSearchBtn) {
+    globalMessagesSearchBtn.addEventListener('click', () => {
+        document.getElementById('globalMessagesSearchModal').style.display = 'block';
+    });
+}
+
+function closeGlobalMessagesSearchModal() {
+    document.getElementById('globalMessagesSearchModal').style.display = 'none';
+    document.getElementById('globalMessagesSearchQuery').value = '';
+    document.getElementById('globalMessagesSearchResults').innerHTML = '';
+}
+
+document.getElementById('globalMessagesSearchQuery')?.addEventListener('input', (e) => {
+    const query = e.target.value.trim();
+    
+    if (globalMessagesDebounceTimer) {
+        clearTimeout(globalMessagesDebounceTimer);
+    }
+    
+    if (query.length < 2) {
+        document.getElementById('globalMessagesSearchResults').innerHTML = '';
+        return;
+    }
+    
+    globalMessagesDebounceTimer = setTimeout(() => {
+        fetch(`/chat/search/global?q=${encodeURIComponent(query)}`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.success && data.results.length > 0) {
+                    const resultsHtml = data.results.map(msg => `
+                        <div class="search-result-item" data-other-user-id="${msg.other_user_id}">
+                            <div class="result-other-user">Chat with: ${escapeHtml(msg.other_user)}</div>
+                            <div class="result-sender">${escapeHtml(msg.sender)}:</div>
+                            <div class="result-content">${escapeHtml(msg.content)}</div>
+                            <div class="result-time">${new Date(msg.created_at).toLocaleString()}</div>
+                        </div>
+                    `).join('');
+                    document.getElementById('globalMessagesSearchResults').innerHTML = resultsHtml;
+                    
+                    document.querySelectorAll('#globalMessagesSearchResults .search-result-item').forEach(item => {
+                        item.addEventListener('click', () => {
+                            const otherUserId = item.dataset.otherUserId;
+                            if (otherUserId) {
+                                window.location.href = `/chat/${otherUserId}`;
+                            }
+                        });
+                    });
+                } else {
+                    document.getElementById('globalMessagesSearchResults').innerHTML = '<div class="search-no-result">No messages found</div>';
+                }
+            });
+    }, 300);
+});
+
 // Tab switching
 const tabButtons = document.querySelectorAll('.tab-button');
 const tabContents = document.querySelectorAll('.tab-content');
@@ -486,13 +630,6 @@ const searchInput = document.getElementById('searchUser');
 const inviteBtn = document.getElementById('inviteBtn');
 const searchResult = document.getElementById('searchResult');
 let debounceTimer;
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
 
 function selectUser(username) {
     searchInput.value = username;
@@ -569,7 +706,7 @@ if (inviteBtn) {
             } else {
                 const errorMsg = data.error || 'Failed to send invitation';
                 if (window.toast) {
-                    window.toast.error(errorMsg);
+                    window.toast.error(escapeHtml(errorMsg));
                 } else {
                     alert('Error: ' + errorMsg);
                 }
@@ -578,7 +715,7 @@ if (inviteBtn) {
         .catch(error => {
             console.error('Invite error:', error);
             if (window.toast) {
-                window.toast.error('Network error: ' + error.message);
+                window.toast.error('Network error: ' + escapeHtml(error.message));
             } else {
                 alert('Network error: ' + error.message);
             }
@@ -598,10 +735,10 @@ document.querySelectorAll('.accept-group-invite').forEach(btn => {
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    toast.success('Joined group');
+                    if (window.toast) window.toast.success('Joined group');
                     window.location.href = '/chat/groups';
                 } else {
-                    toast.error(data.error || 'Failed to accept invitation');
+                    if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to accept invitation'));
                 }
             });
     });
@@ -614,10 +751,10 @@ document.querySelectorAll('.decline-group-invite').forEach(btn => {
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    toast.success('Invitation declined');
+                    if (window.toast) window.toast.success('Invitation declined');
                     btn.closest('.group-invite-item').remove();
                 } else {
-                    toast.error(data.error || 'Failed to decline invitation');
+                    if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to decline invitation'));
                 }
             });
     });
@@ -630,10 +767,10 @@ document.querySelectorAll('.cancel-group-invite').forEach(btn => {
             .then(res => res.json())
             .then(data => {
                 if (data.success) {
-                    toast.success('Invitation cancelled');
+                    if (window.toast) window.toast.success('Invitation cancelled');
                     btn.closest('.group-invite-item').remove();
                 } else {
-                    toast.error(data.error || 'Failed to cancel invitation');
+                    if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to cancel invitation'));
                 }
             });
     });
@@ -688,12 +825,12 @@ document.getElementById('submitCreateBtn')?.addEventListener('click', () => {
     const description = document.getElementById('groupDescription').value.trim();
     
     if (!name) {
-        toast.warning('Please enter a group name');
+        if (window.toast) window.toast.warning('Please enter a group name');
         return;
     }
     
     if (name.length < 3) {
-        toast.warning('Group name must be at least 3 characters');
+        if (window.toast) window.toast.warning('Group name must be at least 3 characters');
         return;
     }
     
@@ -712,17 +849,17 @@ document.getElementById('submitCreateBtn')?.addEventListener('click', () => {
     .then(res => res.json())
     .then(data => {
         if (data.success) {
-            toast.success('Group "' + data.name + '" created successfully');
+            if (window.toast) window.toast.success('Group "' + escapeHtml(data.name) + '" created successfully');
             closeCreateModal();
             setTimeout(() => {
                 window.location.href = '/chat/groups';
             }, 1000);
         } else {
-            toast.error(data.error || 'Failed to create group');
+            if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to create group'));
         }
     })
     .catch(error => {
-        toast.error('Network error: ' + error.message);
+        if (window.toast) window.toast.error('Network error: ' + escapeHtml(error.message));
     })
     .finally(() => {
         btn.disabled = false;

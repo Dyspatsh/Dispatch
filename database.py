@@ -30,7 +30,7 @@ class User(Base):
     subscription_expires_at = Column(DateTime, nullable=True)
     failed_login_attempts = Column(Integer, default=0)
     last_failed_login = Column(DateTime, nullable=True)
-    read_receipts_enabled = Column(Boolean, default=True)
+    read_receipts_enabled = Column(Boolean, default=True)  # ADDED THIS FIELD
     bio = Column(Text, nullable=True)
     
     # 2FA Fields

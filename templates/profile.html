@@ -49,7 +49,7 @@
                 <div class="account-info">
                     <div class="info-row">
                         <span class="info-label">Username:</span>
-                        <span class="info-value">{{ user.username }}</span>
+                        <span class="info-value" id="usernameDisplay">{{ user.username }}</span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Role:</span>
@@ -64,9 +64,12 @@
                         <span class="info-value">{{ ((now - user.created_at).days) }} days</span>
                     </div>
                     {% if user.subscription_expires_at and user.role in ['pro', 'premium'] %}
-                    <div class="info-row">
-                        <span class="info-label">Subscription expires:</span>
-                        <span class="info-value">{{ user.subscription_expires_at.strftime('%Y-%m-%d') }} ({{ ((user.subscription_expires_at - now).days) }} days left)</span>
+                    <div class="info-row subscription-row">
+                        <span class="info-label">Subscription:</span>
+                        <span class="info-value">
+                            Expires on {{ user.subscription_expires_at.strftime('%Y-%m-%d') }}
+                            <span id="subscriptionCountdown" class="countdown-timer" data-expires="{{ user.subscription_expires_at.isoformat() }}"></span>
+                        </span>
                     </div>
                     {% endif %}
                 </div>
@@ -75,7 +78,7 @@
                     <h3>Bio</h3>
                     <div class="bio-display" id="bioDisplay">
                         {% if user.bio %}
-                            <p>{{ user.bio }}</p>
+                            <p id="bioTextDisplay">{{ user.bio }}</p>
                         {% else %}
                             <p class="bio-empty">No bio set yet</p>
                         {% endif %}
@@ -432,6 +435,20 @@
     color: var(--text-primary);
 }
 
+.countdown-timer {
+    margin-left: 0.5rem;
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: var(--primary);
+    font-weight: bold;
+}
+
+.subscription-row .info-value {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
 .role-badge {
     display: inline-block;
     background: var(--gradient-primary);
@@ -749,6 +766,43 @@ input:checked + .theme-slider:before, input:checked + .toggle-slider:before {
 </style>
 
 <script>
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Subscription countdown timer
+function updateSubscriptionCountdown() {
+    const countdownSpan = document.getElementById('subscriptionCountdown');
+    if (!countdownSpan) return;
+    
+    const expiresAt = new Date(countdownSpan.dataset.expires);
+    const now = new Date();
+    const diff = expiresAt - now;
+    
+    if (diff <= 0) {
+        countdownSpan.textContent = '(Expired)';
+        return;
+    }
+    
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    
+    if (days > 0) {
+        countdownSpan.textContent = `(${days}d ${hours}h left)`;
+    } else if (hours > 0) {
+        countdownSpan.textContent = `(${hours}h ${minutes}m left)`;
+    } else if (minutes > 0) {
+        countdownSpan.textContent = `(${minutes}m left)`;
+    } else {
+        countdownSpan.textContent = '(Less than a minute left)';
+    }
+}
+
+// Theme toggle
 const themeToggle = document.getElementById('themeToggle');
 if (themeToggle) {
     themeToggle.addEventListener('change', function() {
@@ -763,20 +817,31 @@ if (themeToggle) {
     });
 }
 
+// Read receipts toggle
 const readReceiptsToggle = document.getElementById('readReceiptsToggle');
 if (readReceiptsToggle) {
     readReceiptsToggle.addEventListener('change', function() {
-        fetch('/chat/settings/read_receipts', {
+        const enabled = this.checked;
+        fetch('/profile/read-receipts', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'enabled=' + this.checked
+            body: 'enabled=' + enabled
         }).then(res => res.json()).then(data => {
             if (!data.success) {
-                toast.error(data.error);
+                if (window.toast) {
+                    window.toast.error(escapeHtml(data.error));
+                }
                 this.checked = !this.checked;
             } else {
-                toast.success('Read receipts ' + (this.checked ? 'enabled' : 'disabled'));
+                if (window.toast) {
+                    window.toast.success('Read receipts ' + (enabled ? 'enabled' : 'disabled'));
+                }
             }
+        }).catch(error => {
+            if (window.toast) {
+                window.toast.error('Network error: ' + escapeHtml(error.message));
+            }
+            this.checked = !this.checked;
         });
     });
 }
@@ -862,10 +927,10 @@ function loadBlockedUsers() {
                             .then(res => res.json())
                             .then(data => {
                                 if (data.success) {
-                                    toast.success('User unblocked');
+                                    if (window.toast) window.toast.success('User unblocked');
                                     loadBlockedUsers();
                                 } else {
-                                    toast.error(data.error);
+                                    if (window.toast) window.toast.error(escapeHtml(data.error));
                                 }
                             });
                     });
@@ -923,17 +988,24 @@ document.getElementById('saveBioBtn')?.addEventListener('click', () => {
         body: formData
     }).then(res => res.json()).then(data => {
         if (data.success) {
-            toast.success('Bio updated');
+            if (window.toast) window.toast.success('Bio updated');
             const bioDisplay = document.getElementById('bioDisplay');
+            const bioTextDisplay = document.getElementById('bioTextDisplay');
             if (bio) {
-                bioDisplay.innerHTML = `<p>${escapeHtml(bio)}</p>`;
+                if (bioTextDisplay) {
+                    bioTextDisplay.textContent = bio;
+                } else {
+                    bioDisplay.innerHTML = `<p id="bioTextDisplay">${escapeHtml(bio)}</p>`;
+                }
             } else {
                 bioDisplay.innerHTML = '<p class="bio-empty">No bio set yet</p>';
             }
             closeEditBioModal();
         } else {
-            toast.error(data.error);
+            if (window.toast) window.toast.error(escapeHtml(data.error));
         }
+    }).catch(error => {
+        if (window.toast) window.toast.error('Network error: ' + escapeHtml(error.message));
     }).finally(() => {
         btn.disabled = false;
         btn.textContent = 'Save Bio';
@@ -958,7 +1030,7 @@ document.getElementById('submitPasswordChangeBtn')?.addEventListener('click', ()
     const confirm = document.getElementById('confirmPassword').value;
     
     if (newPass !== confirm) {
-        toast.error('New passwords do not match');
+        if (window.toast) window.toast.error('New passwords do not match');
         return;
     }
     
@@ -976,11 +1048,13 @@ document.getElementById('submitPasswordChangeBtn')?.addEventListener('click', ()
         body: formData
     }).then(res => res.text()).then(html => {
         if (html.includes('success')) {
-            toast.success('Password changed successfully');
+            if (window.toast) window.toast.success('Password changed successfully');
             closeChangePasswordModal();
         } else if (html.includes('error')) {
-            toast.error('Failed to change password');
+            if (window.toast) window.toast.error('Failed to change password');
         }
+    }).catch(error => {
+        if (window.toast) window.toast.error('Network error: ' + escapeHtml(error.message));
     }).finally(() => {
         btn.disabled = false;
         btn.textContent = 'Change Password';
@@ -1005,12 +1079,12 @@ document.getElementById('submitPinChangeBtn')?.addEventListener('click', () => {
     const confirm = document.getElementById('confirmPin').value;
     
     if (newPin !== confirm) {
-        toast.error('New PINs do not match');
+        if (window.toast) window.toast.error('New PINs do not match');
         return;
     }
     
     if (!/^\d{6}$/.test(newPin)) {
-        toast.error('PIN must be exactly 6 digits');
+        if (window.toast) window.toast.error('PIN must be exactly 6 digits');
         return;
     }
     
@@ -1028,11 +1102,13 @@ document.getElementById('submitPinChangeBtn')?.addEventListener('click', () => {
         body: formData
     }).then(res => res.text()).then(html => {
         if (html.includes('success')) {
-            toast.success('PIN changed successfully');
+            if (window.toast) window.toast.success('PIN changed successfully');
             closeChangePinModal();
         } else if (html.includes('error')) {
-            toast.error('Failed to change PIN');
+            if (window.toast) window.toast.error('Failed to change PIN');
         }
+    }).catch(error => {
+        if (window.toast) window.toast.error('Network error: ' + escapeHtml(error.message));
     }).finally(() => {
         btn.disabled = false;
         btn.textContent = 'Change PIN';
@@ -1055,7 +1131,7 @@ document.getElementById('confirmDeleteBtn')?.addEventListener('click', () => {
     const confirm = document.getElementById('deleteConfirm').value;
     
     if (confirm !== 'DELETE') {
-        toast.error('Type DELETE to confirm');
+        if (window.toast) window.toast.error('Type DELETE to confirm');
         return;
     }
     
@@ -1087,12 +1163,9 @@ document.getElementById('cancelLogoutBtn')?.addEventListener('click', () => {
     showSection('myaccount');
 });
 
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
+// Start countdown timer
+updateSubscriptionCountdown();
+setInterval(updateSubscriptionCountdown, 60000);
 
 loadFileStats();
 </script>
