@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, BigInteger, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Text, BigInteger, ForeignKey, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
@@ -12,6 +12,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
 
 class User(Base):
     __tablename__ = "users"
@@ -56,6 +57,7 @@ class User(Base):
     sent_group_invitations = relationship("GroupInvitation", foreign_keys="GroupInvitation.inviter_id", back_populates="inviter", cascade="all, delete-orphan")
     received_group_invitations = relationship("GroupInvitation", foreign_keys="GroupInvitation.invited_user_id", back_populates="invited_user", cascade="all, delete-orphan")
 
+
 class File(Base):
     __tablename__ = "files"
     
@@ -64,6 +66,7 @@ class File(Base):
     recipient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     filename = Column(String(255), nullable=False)
     encrypted_filename = Column(String(255), nullable=False)
+    encrypted_file_key = Column(Text, nullable=True)  # Encrypted AES key for the file
     file_size = Column(BigInteger, nullable=False)
     status = Column(String(20), default="pending")
     options = Column(Text, nullable=True)
@@ -75,6 +78,7 @@ class File(Base):
     # Relationships
     sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_files")
     recipient = relationship("User", foreign_keys=[recipient_id], back_populates="received_files")
+
 
 class Message(Base):
     __tablename__ = "messages"
@@ -89,6 +93,7 @@ class Message(Base):
     
     # Relationships
     user = relationship("User", foreign_keys=[user_id], back_populates="messages")
+
 
 class Payment(Base):
     __tablename__ = "payments"
@@ -106,6 +111,7 @@ class Payment(Base):
     # Relationship
     user = relationship("User", back_populates="payments")
 
+
 class Session(Base):
     __tablename__ = "sessions"
     
@@ -119,6 +125,7 @@ class Session(Base):
     # Relationship
     user = relationship("User", back_populates="sessions")
 
+
 class UserKey(Base):
     __tablename__ = "user_keys"
     
@@ -130,6 +137,7 @@ class UserKey(Base):
     
     # Relationship
     user = relationship("User", back_populates="user_keys")
+
 
 class ChatConversation(Base):
     __tablename__ = "chat_conversations"
@@ -148,6 +156,7 @@ class ChatConversation(Base):
     initiator = relationship("User", foreign_keys=[initiator_id], back_populates="sent_invitations")
     messages = relationship("ChatMessage", back_populates="conversation", cascade="all, delete-orphan")
 
+
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     
@@ -164,6 +173,7 @@ class ChatMessage(Base):
     conversation = relationship("ChatConversation", back_populates="messages")
     sender = relationship("User", foreign_keys=[sender_id])
 
+
 class BlockedUser(Base):
     __tablename__ = "blocked_users"
     
@@ -176,7 +186,8 @@ class BlockedUser(Base):
     user = relationship("User", foreign_keys=[user_id], back_populates="blocked_users")
     blocked_user = relationship("User", foreign_keys=[blocked_user_id], back_populates="blocked_by")
 
-# Phase 2: Group Chat Tables
+
+# Group Chat Tables
 class ChatGroup(Base):
     __tablename__ = "chat_groups"
     
@@ -193,6 +204,7 @@ class ChatGroup(Base):
     messages = relationship("GroupChatMessage", back_populates="group", cascade="all, delete-orphan")
     invitations = relationship("GroupInvitation", back_populates="group", cascade="all, delete-orphan")
 
+
 class GroupMember(Base):
     __tablename__ = "group_members"
     
@@ -206,6 +218,7 @@ class GroupMember(Base):
     # Relationships
     group = relationship("ChatGroup", back_populates="members")
     user = relationship("User", back_populates="groups")
+
 
 class GroupChatMessage(Base):
     __tablename__ = "group_chat_messages"
@@ -225,6 +238,7 @@ class GroupChatMessage(Base):
     reactions = relationship("MessageReaction", back_populates="message", cascade="all, delete-orphan")
     read_receipts = relationship("MessageReadReceipt", back_populates="message", cascade="all, delete-orphan")
 
+
 class MessageReaction(Base):
     __tablename__ = "message_reactions"
     
@@ -238,6 +252,7 @@ class MessageReaction(Base):
     message = relationship("GroupChatMessage", back_populates="reactions")
     user = relationship("User", back_populates="message_reactions")
 
+
 class MessageReadReceipt(Base):
     __tablename__ = "message_read_receipts"
     
@@ -249,6 +264,7 @@ class MessageReadReceipt(Base):
     # Relationships
     message = relationship("GroupChatMessage", back_populates="read_receipts")
     user = relationship("User", back_populates="read_receipts")
+
 
 class GroupInvitation(Base):
     __tablename__ = "group_invitations"
@@ -265,6 +281,7 @@ class GroupInvitation(Base):
     inviter = relationship("User", foreign_keys=[inviter_id], back_populates="sent_group_invitations")
     invited_user = relationship("User", foreign_keys=[invited_user_id], back_populates="received_group_invitations")
 
+
 class LoginHistory(Base):
     __tablename__ = "login_history"
     
@@ -275,8 +292,10 @@ class LoginHistory(Base):
     # Relationship
     user = relationship("User", back_populates="login_history")
 
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+
 
 def get_db():
     db = SessionLocal()

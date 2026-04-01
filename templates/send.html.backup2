@@ -935,7 +935,7 @@ class UploadQueue {
             
             this.encryptFile(item.file).then(({ encryptedBlob, keyBase64 }) => {
                 formData.append('encrypted_file', encryptedBlob, 'encrypted.bin');
-                formData.append('encryption_key', keyBase64);
+                formData.append('file_key_b64', keyBase64);
                 
                 const xhr = new XMLHttpRequest();
                 item.xhr = xhr;

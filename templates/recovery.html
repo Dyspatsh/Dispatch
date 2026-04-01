@@ -19,6 +19,8 @@
     <p>Enter your 64-character recovery phrase to recover your account. This will reset your password and PIN.</p>
     
     <form method="post" action="/recovery">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        
         <div class="form-group">
             <label for="recovery_phrase">Recovery Phrase</label>
             <textarea id="recovery_phrase" name="recovery_phrase" rows="3" required placeholder="Enter your 64-character recovery phrase"></textarea>

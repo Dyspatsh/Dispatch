@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Decrypting File{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h1>Decrypting File</h1>
+    <p>Your file is being decrypted in your browser. The server never sees your decrypted file.</p>
+    <div class="progress-bar-wrapper">
+        <div class="progress-bar" id="progressBar" style="width: 0%;"></div>
+    </div>
+    <p id="status">Starting download...</p>
+</div>
+
+<script>
+const encryptionKeyBase64 = "{{ encryption_key }}";
+const filename = "{{ filename }}";
+const fileUrl = "{{ file_url }}";
+
+async function downloadAndDecrypt() {
+    try {
+        const statusEl = document.getElementById('status');
+        const progressEl = document.getElementById('progressBar');
+        
+        statusEl.textContent = 'Downloading encrypted file...';
+        progressEl.style.width = '20%';
+        
+        const response = await fetch(fileUrl);
+        const encryptedData = await response.arrayBuffer();
+        
+        statusEl.textContent = 'Preparing decryption...';
+        progressEl.style.width = '40%';
+        
+        const keyBytes = new Uint8Array(atob(encryptionKeyBase64).split('').map(c => c.charCodeAt(0)));
+        
+        const aesKey = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+        
+        statusEl.textContent = 'Decrypting file...';
+        progressEl.style.width = '60%';
+        
+        const iv = encryptedData.slice(0, 12);
+        const tag = encryptedData.slice(-16);
+        const encrypted = encryptedData.slice(12, -16);
+        
+        const encryptedWithTag = new Uint8Array(encrypted.byteLength + tag.byteLength);
+        encryptedWithTag.set(new Uint8Array(encrypted), 0);
+        encryptedWithTag.set(new Uint8Array(tag), encrypted.byteLength);
+        
+        const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, aesKey, encryptedWithTag);
+        
+        statusEl.textContent = 'Creating download...';
+        progressEl.style.width = '80%';
+        
+        let mimeType = 'application/octet-stream';
+        const ext = filename.split('.').pop().toLowerCase();
+        if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
+        else if (ext === 'png') mimeType = 'image/png';
+        else if (ext === 'gif') mimeType = 'image/gif';
+        
+        const blob = new Blob([decrypted], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        statusEl.textContent = 'Download complete! File decrypted in your browser.';
+        progressEl.style.width = '100%';
+        
+        setTimeout(() => { window.location.href = '/history'; }, 3000);
+        
+    } catch (error) {
+        document.getElementById('status').textContent = 'Error: ' + error.message;
+        document.getElementById('progressBar').style.width = '0%';
+        console.error('Decryption error:', error);
+    }
+}
+
+downloadAndDecrypt();
+</script>
+
+<style>
+.progress-bar-wrapper {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    height: 20px;
+    overflow: hidden;
+    margin: 1rem 0;
+}
+.progress-bar {
+    background: var(--gradient-primary);
+    height: 100%;
+    width: 0%;
+    transition: width 0.3s ease;
+    border-radius: var(--radius-sm);
+}
+#status {
+    text-align: center;
+    color: var(--text-secondary);
+    margin-top: 1rem;
+}
+</style>
+{% endblock %}

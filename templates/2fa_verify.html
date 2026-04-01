@@ -12,6 +12,8 @@
     {% endif %}
     
     <form method="post" action="/2fa-verify">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        
         <div class="form-group">
             <label for="code">Verification Code</label>
             <input type="text" id="code" name="code" required placeholder="Enter your code or recovery phrase" maxlength="8">

@@ -17,6 +17,10 @@ import base64
 import psutil
 from dotenv import load_dotenv
 from sqlalchemy import func, desc
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 
 from database import get_db, User, File, Payment, Session as DBSession, ChatConversation, ChatMessage, BlockedUser, LoginHistory
 from chat import router as chat_router
@@ -31,8 +35,15 @@ if not SECRET_KEY:
 
 app = FastAPI(title="Dispatch")
 
-# Account lockout tracking
-login_attempts = {}
+# Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
 
 app.include_router(chat_router)
 app.include_router(roles_router)
@@ -42,6 +53,10 @@ templates = Jinja2Templates(directory="templates")
 
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/home/dispatch/dyspatch/uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# ============================================
+# HELPER FUNCTIONS
+# ============================================
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -57,6 +72,40 @@ def escape_html(text: str) -> str:
     if not text:
         return ""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+
+def derive_key_from_password(password: str, salt: bytes) -> bytes:
+    """Derive encryption key from user password"""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    return kdf.derive(password.encode())
+
+def encrypt_aes_key(aes_key: bytes, user_password: str) -> tuple:
+    """Encrypt the AES file key with user's password"""
+    salt = secrets.token_bytes(16)
+    derived_key = derive_key_from_password(user_password, salt)
+    
+    iv = secrets.token_bytes(12)
+    cipher = Cipher(algorithms.AES(derived_key), modes.GCM(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    encrypted_key = encryptor.update(aes_key) + encryptor.finalize()
+    
+    return salt, iv, encrypted_key, encryptor.tag
+
+def decrypt_aes_key(encrypted_key_data: bytes, user_password: str, salt: bytes, iv: bytes, tag: bytes) -> bytes:
+    """Decrypt the AES file key with user's password"""
+    derived_key = derive_key_from_password(user_password, salt)
+    cipher = Cipher(algorithms.AES(derived_key), modes.GCM(iv, tag), backend=default_backend())
+    decryptor = cipher.decryptor()
+    return decryptor.update(encrypted_key_data) + decryptor.finalize()
+
+def sanitize_filename(filename: str) -> str:
+    """Remove dangerous characters from filename for HTTP headers"""
+    return "".join(c for c in filename if c.isalnum() or c in "._- ")
 
 def validate_username(username: str) -> tuple:
     if len(username) < 3:
@@ -76,7 +125,7 @@ def validate_password(password: str) -> tuple:
         return False, "Password must contain at least one capital letter"
     if not re.search(r'[0-9]', password):
         return False, "Password must contain at least one number"
-    if not re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+    if not re.search(r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>/?]', password):
         return False, "Password must contain at least one symbol (!@#$%^&* etc.)"
     return True, ""
 
@@ -86,6 +135,8 @@ def validate_pin(pin: str) -> tuple:
     if not pin.isdigit():
         return False, "PIN must contain only numbers"
     return True, ""
+
+login_attempts = {}
 
 def check_login_lockout(username: str) -> tuple:
     if username in login_attempts:
@@ -128,7 +179,6 @@ def get_current_user(db: Session, session_token: str = None):
         return None
     user = db_session.user
     
-    # Check if user still exists (prevents deleted users from accessing)
     if not user:
         return None
     
@@ -347,7 +397,9 @@ async def register(
     return templates.TemplateResponse("register.html", {"request": request, "success": "Account created!", "recovery_phrase": recovery_phrase})
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
+async def login_page(request: Request, user = Depends(get_user_from_session)):
+    if user:
+        return RedirectResponse(url="/home", status_code=303)
     return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/login")
@@ -360,7 +412,6 @@ async def login(
 ):
     username = escape_html(username)
     
-    # Check if request wants JSON response (AJAX)
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     
     locked, message = check_login_lockout(username)
@@ -390,12 +441,11 @@ async def login(
     
     if user.is_banned:
         if is_ajax:
-            return {"success": False, "error": f"Account banned: {user.ban_reason}"}
-        return templates.TemplateResponse("login.html", {"request": request, "error": f"Account banned: {user.ban_reason}"})
+            return {"success": False, "error": "Account disabled"}
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Account disabled"})
     
     reset_login_attempts(username)
     
-    # Add to login history
     login_record = LoginHistory(user_id=user.id)
     db.add(login_record)
     
@@ -592,11 +642,9 @@ async def update_read_receipts(
     user = Depends(get_user_from_session),
     db: Session = Depends(get_db)
 ):
-    """Update read receipts setting for the user"""
     if not user:
         return {"success": False, "error": "Not authenticated"}
     
-    # Check if user is Premium (only Premium users can disable read receipts)
     if not enabled and user.role not in ["premium", "owner"]:
         return {"success": False, "error": "Read receipts can only be disabled by Premium users"}
     
@@ -612,7 +660,16 @@ async def send_page(request: Request, user = Depends(get_user_from_session)):
     return templates.TemplateResponse("send.html", {"request": request, "user": user})
 
 @app.post("/send/submit")
-async def submit_file(recipient: str = Form(...), filename: str = Form(...), file_size: str = Form(...), options: str = Form(...), encrypted_file: UploadFile = FastAPIFile(...), encryption_key: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def submit_file(
+    recipient: str = Form(...), 
+    filename: str = Form(...), 
+    file_size: str = Form(...), 
+    options: str = Form(...), 
+    encrypted_file: UploadFile = FastAPIFile(...), 
+    encryption_key: str = Form(...), 
+    user = Depends(get_user_from_session), 
+    db: Session = Depends(get_db)
+):
     if not user:
         return {"success": False, "error": "Not authenticated"}
     
@@ -660,7 +717,26 @@ async def submit_file(recipient: str = Form(...), filename: str = Form(...), fil
     file_path = os.path.join(UPLOAD_DIR, encrypted_filename)
     with open(file_path, "wb") as f:
         f.write(encrypted_data)
-    new_file = File(sender_id=user.id, recipient_id=recipient_user.id, filename=filename, encrypted_filename=encrypted_filename, file_size=file_size_int, status="pending", options=json.dumps(opts), expires_at=pending_expiry)
+    
+    # Encrypt the AES key with recipient's password
+    try:
+        aes_key = base64.b64decode(encryption_key)
+        salt, iv, encrypted_key, tag = encrypt_aes_key(aes_key, recipient_user.password_hash)
+        encrypted_key_data = base64.b64encode(salt + iv + encrypted_key + tag).decode('utf-8')
+    except Exception as e:
+        return {"success": False, "error": f"Failed to encrypt key: {str(e)}"}
+    
+    new_file = File(
+        sender_id=user.id,
+        recipient_id=recipient_user.id,
+        filename=filename,
+        encrypted_filename=encrypted_filename,
+        encrypted_file_key=encrypted_key_data,
+        file_size=file_size_int,
+        status="pending",
+        options=json.dumps(opts),
+        expires_at=pending_expiry
+    )
     db.add(new_file)
     db.commit()
     return {"success": True, "file_id": new_file.id}
@@ -715,25 +791,68 @@ async def cancel_file(file_id: int, user = Depends(get_user_from_session), db: S
     return RedirectResponse(url="/history", status_code=303)
 
 @app.get("/files/download/{file_id}")
-async def download_file(request: Request, file_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db), password: str = None):
+async def download_file(
+    request: Request, 
+    file_id: int, 
+    user = Depends(get_user_from_session), 
+    db: Session = Depends(get_db), 
+    password: str = None
+):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
+    
     file = db.query(File).filter(File.id == file_id, File.recipient_id == user.id, File.status == "accepted").first()
     if not file:
         return RedirectResponse(url="/history", status_code=303)
+    
     file_path = os.path.join(UPLOAD_DIR, file.encrypted_filename)
     if not os.path.exists(file_path):
         file.status = "expired"
         db.commit()
         return RedirectResponse(url="/history", status_code=303)
+    
     opts = json.loads(file.options) if file.options else {}
     if opts.get("password_protected"):
         if not password:
             return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user})
         elif not verify_password(password, opts.get("file_password_hash")):
             return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user, "error": "Incorrect password"})
-    response = FileResponse(file_path, media_type="application/octet-stream", filename=file.filename, headers={"Content-Disposition": f"attachment; filename=\"{file.filename}\""})
-    return response
+    
+    if file.encrypted_file_key:
+        try:
+            encrypted_key_data = base64.b64decode(file.encrypted_file_key)
+            salt = encrypted_key_data[:16]
+            iv = encrypted_key_data[16:28]
+            tag = encrypted_key_data[-16:]
+            encrypted_key = encrypted_key_data[28:-16]
+            
+            aes_key = decrypt_aes_key(encrypted_key, user.password_hash, salt, iv, tag)
+            
+            # Read and decrypt the file
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+            
+            file_iv = encrypted_data[:12]
+            file_tag = encrypted_data[-16:]
+            encrypted_content = encrypted_data[12:-16]
+            
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            from cryptography.hazmat.backends import default_backend
+            cipher = Cipher(algorithms.AES(aes_key), modes.GCM(file_iv, file_tag), backend=default_backend())
+            decryptor = cipher.decryptor()
+            decrypted_data = decryptor.update(encrypted_content) + decryptor.finalize()
+            
+            safe_filename = sanitize_filename(file.filename)
+            return Response(
+                content=decrypted_data,
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'}
+            )
+        except Exception as e:
+            return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user, "error": f"Decryption failed: {str(e)}"})
+    
+    safe_filename = sanitize_filename(file.filename)
+    return FileResponse(file_path, media_type="application/octet-stream", filename=file.filename, headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'})
 
 @app.get("/search")
 async def search_users(q: str, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
@@ -744,7 +863,7 @@ async def search_users(q: str, user = Depends(get_user_from_session), db: Sessio
         func.lower(User.username).contains(q.lower()),
         User.id != user.id,
         User.is_banned == False,
-        User.role.in_(['pro', 'premium', 'owner'])
+        User.role.in_(['user', 'pro', 'premium', 'owner'])
     ).limit(10).all()
     return {"users": [{"id": u.id, "username": u.username} for u in users]}
 
@@ -850,52 +969,9 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
     if not user or user.role != "owner":
         return RedirectResponse(url="/home", status_code=303)
     
-    total_users = db.query(User).count()
-    active_users = db.query(User).filter(User.last_login > datetime.utcnow() - timedelta(days=7)).count()
-    total_files = db.query(File).count()
-    total_storage = db.query(func.sum(File.file_size)).scalar() or 0
-    total_storage_gb = round(total_storage / (1024 * 1024 * 1024), 1)
-    
-    users_by_role = {
-        "free": db.query(User).filter(User.role == "user", User.is_banned == False).count(),
-        "pro": db.query(User).filter(User.role == "pro", User.is_banned == False).count(),
-        "premium": db.query(User).filter(User.role == "premium", User.is_banned == False).count(),
-        "owner": db.query(User).filter(User.role == "owner").count(),
-        "banned": db.query(User).filter(User.is_banned == True).count()
-    }
-    
-    files_by_status = {
-        "pending": db.query(File).filter(File.status == "pending").count(),
-        "accepted": db.query(File).filter(File.status == "accepted").count(),
-        "declined": db.query(File).filter(File.status == "declined").count(),
-        "downloaded": db.query(File).filter(File.status == "downloaded").count(),
-        "expired": db.query(File).filter(File.expires_at < datetime.utcnow()).count()
-    }
-    
-    users = db.query(
-        User.id, User.username, User.role, User.created_at, User.last_login, 
-        User.is_banned, User.ban_reason, User.subscription_expires_at,
-        func.count(File.id).label("file_count")
-    ).outerjoin(File, File.sender_id == User.id).group_by(User.id).order_by(desc("file_count")).limit(50).all()
-    
-    system_health = {
-        "cpu_percent": psutil.cpu_percent(interval=1),
-        "memory_percent": psutil.virtual_memory().percent,
-        "disk_usage": psutil.disk_usage('/').percent,
-        "uptime": str(datetime.utcnow() - datetime.fromtimestamp(psutil.boot_time())).split('.')[0]
-    }
-    
     return templates.TemplateResponse("admin_simple.html", {
         "request": request,
         "user": user,
-        "total_users": total_users,
-        "active_users": active_users,
-        "total_files": total_files,
-        "total_storage": total_storage_gb,
-        "users_by_role": users_by_role,
-        "files_by_status": files_by_status,
-        "users": users,
-        "system_health": system_health,
         "now": datetime.utcnow()
     })
 
@@ -910,26 +986,12 @@ async def admin_stats(user = Depends(get_user_from_session), db: Session = Depen
     total_storage = db.query(func.sum(File.file_size)).scalar() or 0
     total_storage_gb = round(total_storage / (1024 * 1024 * 1024), 1)
     
-    free = db.query(User).filter(User.role == "user", User.is_banned == False).count()
-    pro = db.query(User).filter(User.role == "pro", User.is_banned == False).count()
-    premium = db.query(User).filter(User.role == "premium", User.is_banned == False).count()
-    banned = db.query(User).filter(User.is_banned == True).count()
-    
-    pending = db.query(File).filter(File.status == "pending").count()
-    expired = db.query(File).filter(File.expires_at < datetime.utcnow()).count()
-    
     return {
         "success": True,
         "total_users": total_users,
         "active_users": active_users,
         "total_files": total_files,
         "total_storage": total_storage_gb,
-        "free": free,
-        "pro": pro,
-        "premium": premium,
-        "banned": banned,
-        "pending": pending,
-        "expired": expired,
         "cpu": psutil.cpu_percent(interval=1),
         "memory": psutil.virtual_memory().percent,
         "disk": psutil.disk_usage('/').percent,
@@ -970,7 +1032,7 @@ async def admin_search_users(q: str = "", role: str = "all", status: str = "all"
             "last_login": u.last_login.strftime("%Y-%m-%d") if u.last_login else "Never",
             "is_banned": u.is_banned,
             "ban_reason": u.ban_reason,
-            "days_left": days_left  # Added subscription days left
+            "days_left": days_left
         })
     
     return {"success": True, "users": result}
@@ -1014,7 +1076,6 @@ async def admin_change_role(user_id: int, role: str = Form(...), user = Depends(
 
 @app.post("/admin/user/delete/{user_id}")
 async def admin_delete_user(user_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
-    """Completely delete a user and all associated data"""
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     
@@ -1022,94 +1083,16 @@ async def admin_delete_user(user_id: int, user = Depends(get_user_from_session),
     if not target:
         return {"success": False, "error": "User not found"}
     
-    print(f"[ADMIN] Deleting user: {target.username} (ID: {target.id})")
-    
-    # 1. Delete all physical files (encrypted files on disk)
     files = db.query(File).filter((File.sender_id == target.id) | (File.recipient_id == target.id)).all()
-    deleted_files = 0
     for f in files:
         file_path = os.path.join(UPLOAD_DIR, f.encrypted_filename)
         if os.path.exists(file_path):
             os.remove(file_path)
-            deleted_files += 1
-    print(f"[ADMIN] Deleted {deleted_files} physical files")
     
-    # 2. Delete all private chat conversations and messages (these will cascade)
-    conversations = db.query(ChatConversation).filter(
-        (ChatConversation.user1_id == target.id) | (ChatConversation.user2_id == target.id)
-    ).all()
-    for conv in conversations:
-        db.delete(conv)
-    print(f"[ADMIN] Deleted {len(conversations)} private conversations")
-    
-    # 3. Delete group memberships
-    group_memberships = db.query(GroupMember).filter(GroupMember.user_id == target.id).all()
-    for gm in group_memberships:
-        db.delete(gm)
-    print(f"[ADMIN] Deleted {len(group_memberships)} group memberships")
-    
-    # 4. Delete group messages sent by user
-    group_messages = db.query(GroupChatMessage).filter(GroupChatMessage.sender_id == target.id).all()
-    for gm in group_messages:
-        db.delete(gm)
-    print(f"[ADMIN] Deleted {len(group_messages)} group messages")
-    
-    # 5. Delete all group invitations (both sent and received)
-    sent_invites = db.query(GroupInvitation).filter(GroupInvitation.inviter_id == target.id).all()
-    for invite in sent_invites:
-        db.delete(invite)
-    
-    received_invites = db.query(GroupInvitation).filter(GroupInvitation.invited_user_id == target.id).all()
-    for invite in received_invites:
-        db.delete(invite)
-    print(f"[ADMIN] Deleted {len(sent_invites) + len(received_invites)} group invitations")
-    
-    # 6. Delete all reactions
-    reactions = db.query(MessageReaction).filter(MessageReaction.user_id == target.id).all()
-    for reaction in reactions:
-        db.delete(reaction)
-    print(f"[ADMIN] Deleted {len(reactions)} reactions")
-    
-    # 7. Delete all read receipts
-    receipts = db.query(MessageReadReceipt).filter(MessageReadReceipt.user_id == target.id).all()
-    for receipt in receipts:
-        db.delete(receipt)
-    print(f"[ADMIN] Deleted {len(receipts)} read receipts")
-    
-    # 8. Delete all blocked users relationships
-    blocks = db.query(BlockedUser).filter(
-        (BlockedUser.user_id == target.id) | (BlockedUser.blocked_user_id == target.id)
-    ).all()
-    for block in blocks:
-        db.delete(block)
-    print(f"[ADMIN] Deleted {len(blocks)} blocked relationships")
-    
-    # 9. Delete all sessions (THIS IS CRITICAL - prevents login after deletion)
-    sessions = db.query(DBSession).filter(DBSession.user_id == target.id).all()
-    for session in sessions:
-        db.delete(session)
-    print(f"[ADMIN] Deleted {len(sessions)} active sessions")
-    
-    # 10. Delete all login history
-    login_history = db.query(LoginHistory).filter(LoginHistory.user_id == target.id).all()
-    for history in login_history:
-        db.delete(history)
-    print(f"[ADMIN] Deleted {len(login_history)} login history records")
-    
-    # 11. Delete all payments
-    payments = db.query(Payment).filter(Payment.user_id == target.id).all()
-    for payment in payments:
-        db.delete(payment)
-    print(f"[ADMIN] Deleted {len(payments)} payment records")
-    
-    # 12. Finally delete the user
-    username = target.username
     db.delete(target)
     db.commit()
     
-    print(f"[ADMIN] Successfully deleted user: {username} (ID: {user_id})")
-    
-    return {"success": True, "message": f"User {username} and all associated data deleted"}
+    return {"success": True, "message": f"User {target.username} and all associated data deleted"}
 
 @app.get("/admin/user/{user_id}")
 async def admin_user_details(user_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
@@ -1184,7 +1167,7 @@ async def admin_user_details(user_id: int, user = Depends(get_user_from_session)
     }
 
 # ============================================
-# ADMIN CHART ENDPOINTS (KEPT)
+# ADMIN CHART ENDPOINTS
 # ============================================
 
 @app.get("/admin/chart/user-growth")
@@ -1305,11 +1288,158 @@ async def chart_activity_heatmap(days: int = 30, session_token: str = Cookie(Non
     
     return {"success": True, "activities": activities}
 
+
+
+
+
+@app.get("/files/raw/{file_id}")
+async def download_raw_file(
+    file_id: int, 
+    user = Depends(get_user_from_session), 
+    db: Session = Depends(get_db)
+):
+    """Serve the raw encrypted file"""
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    file = db.query(File).filter(File.id == file_id, File.recipient_id == user.id, File.status == "accepted").first()
+    if not file:
+        return RedirectResponse(url="/history", status_code=303)
+    
+    file_path = os.path.join(UPLOAD_DIR, file.encrypted_filename)
+    if not os.path.exists(file_path):
+        return RedirectResponse(url="/history", status_code=303)
+    
+    return FileResponse(file_path, media_type="application/octet-stream", filename=f"{file.filename}.encrypted")
+
+
+
+
+
+@app.get("/files/download_decrypted/{file_id}")
+async def download_decrypted_file(
+    file_id: int, 
+    user = Depends(get_user_from_session), 
+    db: Session = Depends(get_db)
+):
+    """Download file already decrypted (server-side decryption)"""
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    file = db.query(File).filter(File.id == file_id, File.recipient_id == user.id, File.status == "accepted").first()
+    if not file:
+        return RedirectResponse(url="/history", status_code=303)
+    
+    file_path = os.path.join(UPLOAD_DIR, file.encrypted_filename)
+    if not os.path.exists(file_path):
+        file.status = "expired"
+        db.commit()
+        return RedirectResponse(url="/history", status_code=303)
+    
+    if file.encrypted_file_key:
+        try:
+            encrypted_key_data = base64.b64decode(file.encrypted_file_key)
+            salt = encrypted_key_data[:16]
+            iv = encrypted_key_data[16:28]
+            tag = encrypted_key_data[-16:]
+            encrypted_key = encrypted_key_data[28:-16]
+            
+            aes_key = decrypt_aes_key(encrypted_key, user.password_hash, salt, iv, tag)
+            
+            # Read and decrypt the file
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+            
+            # The file format is: IV (12 bytes) + encrypted data + tag (16 bytes)
+            file_iv = encrypted_data[:12]
+            tag = encrypted_data[-16:]
+            encrypted_content = encrypted_data[12:-16]
+            
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            from cryptography.hazmat.backends import default_backend
+            cipher = Cipher(algorithms.AES(aes_key), modes.GCM(file_iv, tag), backend=default_backend())
+            decryptor = cipher.decryptor()
+            decrypted_data = decryptor.update(encrypted_content) + decryptor.finalize()
+            
+            # Return decrypted file
+            safe_filename = sanitize_filename(file.filename)
+            return Response(
+                content=decrypted_data,
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'}
+            )
+        except Exception as e:
+            return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user, "error": f"Decryption failed: {str(e)}"})
+    
+    return RedirectResponse(url="/history", status_code=303)
+
+
+
+
+@app.get("/files/download_decrypted/{file_id}")
+async def download_decrypted_file(
+    file_id: int, 
+    user = Depends(get_user_from_session), 
+    db: Session = Depends(get_db)
+):
+    """Download file already decrypted (server-side decryption)"""
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    
+    file = db.query(File).filter(File.id == file_id, File.recipient_id == user.id, File.status == "accepted").first()
+    if not file:
+        return RedirectResponse(url="/history", status_code=303)
+    
+    file_path = os.path.join(UPLOAD_DIR, file.encrypted_filename)
+    if not os.path.exists(file_path):
+        file.status = "expired"
+        db.commit()
+        return RedirectResponse(url="/history", status_code=303)
+    
+    if file.encrypted_file_key:
+        try:
+            encrypted_key_data = base64.b64decode(file.encrypted_file_key)
+            salt = encrypted_key_data[:16]
+            iv = encrypted_key_data[16:28]
+            tag = encrypted_key_data[-16:]
+            encrypted_key = encrypted_key_data[28:-16]
+            
+            aes_key = decrypt_aes_key(encrypted_key, user.password_hash, salt, iv, tag)
+            
+            # Read and decrypt the file
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+            
+            # The file format is: IV (12 bytes) + encrypted data + tag (16 bytes)
+            file_iv = encrypted_data[:12]
+            tag = encrypted_data[-16:]
+            encrypted_content = encrypted_data[12:-16]
+            
+            from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+            from cryptography.hazmat.backends import default_backend
+            cipher = Cipher(algorithms.AES(aes_key), modes.GCM(file_iv, tag), backend=default_backend())
+            decryptor = cipher.decryptor()
+            decrypted_data = decryptor.update(encrypted_content) + decryptor.finalize()
+            
+            # Return decrypted file
+            safe_filename = sanitize_filename(file.filename)
+            return Response(
+                content=decrypted_data,
+                media_type="application/octet-stream",
+    headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'}
+            )
+        except Exception as e:
+            return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user, "error": f"Decryption failed: {str(e)}"})
+    
+    return RedirectResponse(url="/history", status_code=303)
+
+
 # 404 handler
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
     user = await get_user_from_session(request)
     return templates.TemplateResponse("404.html", {"request": request, "user": user}, status_code=404)
+
 
 if __name__ == "__main__":
     import uvicorn

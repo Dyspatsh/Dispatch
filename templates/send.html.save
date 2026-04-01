@@ -1,0 +1,495 @@
+        
+        this.setupEventListeners();
+    }
+    
+    setupEventListeners() {
+        // Click to browse
+        this.dropZone.addEventListener('click', () => {
+            this.fileInput.click();
+        });
+        
+        // File input change
+        this.fileInput.addEventListener('change', (e) => {
+            this.addFiles(Array.from(e.target.files));
+            this.fileInput.value = '';
+        });
+        
+        // Drag and drop
+        this.dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            this.dropZone.classList.add('drag-over');
+        });
+        
+        this.dropZone.addEventListener('dragleave', () => {
+            this.dropZone.classList.remove('drag-over');
+        });
+        
+        this.dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            this.dropZone.classList.remove('drag-over');
+            this.addFiles(Array.from(e.dataTransfer.files));
+        });
+        
+        // Buttons
+        this.sendAllBtn.addEventListener('click', () => this.startUpload());
+        this.removeAllBtn.addEventListener('click', () => this.removeAll());
+        this.clearCompletedBtn.addEventListener('click', () => this.clearCompleted());
+    }
+    
+    addFiles(newFiles) {
+        // Check file count limit
+        if (this.files.length + newFiles.length > maxFiles) {
+            toast.warning(`You can only upload ${maxFiles} files at once`);
+            return;
+        }
+        
+        for (const file of newFiles) {
+            // Check file size limit
+            if (file.size > maxFileSizeBytes) {
+                const maxSizeGB = maxFileSizeBytes / 1073741824;
+                toast.error(`${file.name} exceeds ${maxSizeGB}GB limit`);
+                continue;
+            }
+            
+            // Check for duplicate filenames
+            if (this.files.some(f => f.file.name === file.name)) {
+                toast.warning(`${file.name} already in queue`);
+                continue;
+            }
+            
+            this.files.push({
+                file: file,
+                status: 'pending',
+                progress: 0,
+                speed: 0,
+                xhr: null,
+                fileId: null,
+                error: null
+            });
+        }
+        
+        this.renderQueue();
+        this.updateStats();
+        this.showQueue();
+    }
+    
+    async getFilePreview(file) {
+        const fileType = file.type;
+        const extension = file.name.split('.').pop().toLowerCase();
+        
+        // Image preview
+        if (fileType.startsWith('image/')) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    resolve(`<img src="${e.target.result}" alt="${file.name}">`);
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+        
+        // Video preview
+        if (fileType.startsWith('video/')) {
+            return `<div style="font-size: 1.5rem; font-weight: 300;">[Video]</div>`;
+        }
+        
+        // PDF preview
+        if (fileType === 'application/pdf' || extension === 'pdf') {
+            return `<div style="font-size: 1.5rem; font-weight: 300;">[PDF]</div>`;
+        }
+        
+        // Document preview
+        if (['doc', 'docx', 'txt', 'rtf'].includes(extension)) {
+            return `<div style="font-size: 1.5rem; font-weight: 300;">[Doc]</div>`;
+        }
+        
+        // Archive preview
+        if (['zip', 'rar', '7z', 'tar', 'gz'].includes(extension)) {
+            return `<div style="font-size: 1.5rem; font-weight: 300;">[Archive]</div>`;
+        }
+        
+        // Audio preview
+        if (fileType.startsWith('audio/')) {
+            return `<div style="font-size: 1.5rem; font-weight: 300;">[Audio]</div>`;
+        }
+        
+        // Default file icon
+        return `<div style="font-size: 1.5rem; font-weight: 300;">[File]</div>`;
+    }
+    
+    async renderQueue() {
+        if (this.files.length === 0) {
+            this.queueContainer.style.display = 'none';
+            return;
+        }
+        
+        this.queueContainer.style.display = 'block';
+        let html = '';
+        
+        for (let i = 0; i < this.files.length; i++) {
+            const item = this.files[i];
+            const previewHtml = await this.getFilePreview(item.file);
+            const fileSizeMB = (item.file.size / (1024 * 1024)).toFixed(1);
+            
+            let statusHtml = '';
+            let actionHtml = '';
+            let progressHtml = '';
+            
+            switch (item.status) {
+                case 'pending':
+                    statusHtml = '<span class="file-status pending">Pending</span>';
+                    actionHtml = `<button class="cancel-btn" data-index="${i}">Cancel</button>`;
+                    progressHtml = '';
+                    break;
+                case 'uploading':
+                    statusHtml = '<span class="file-status uploading">Uploading</span>';
+                    actionHtml = `<button class="cancel-btn" data-index="${i}">Cancel</button>`;
+                    progressHtml = `
+                        <div class="progress-wrapper">
+                            <div class="progress-bar-wrapper">
+                                <div class="progress-bar" style="width: ${item.progress}%;"></div>
+                            </div>
+                            <div class="progress-stats">
+                                <span>${item.progress}%</span>
+                                <span>${item.speed} MB/s</span>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'completed':
+                    statusHtml = '<span class="file-status completed">Completed</span>';
+                    actionHtml = '';
+                    progressHtml = `
+                        <div class="progress-wrapper">
+                            <div class="progress-bar-wrapper">
+                                <div class="progress-bar" style="width: 100%;"></div>
+                            </div>
+                            <div class="progress-stats">
+                                <span>100%</span>
+                                <span>Completed</span>
+                            </div>
+                        </div>
+                    `;
+                    break;
+                case 'failed':
+                    statusHtml = '<span class="file-status failed">Failed</span>';
+                    actionHtml = `<button class="retry-btn" data-index="${i}">Retry</button>`;
+                    progressHtml = '';
+                    if (item.error) {
+                        progressHtml = `<div class="error-message" style="color: var(--danger); font-size: 0.7rem; margin-top: 0.25rem;">${item.error}</div>`;
+                    }
+                    break;
+            }
+            
+            html += `
+                <div class="queue-item" data-index="${i}">
+                    <div class="queue-item-header">
+                        <div class="file-preview">${previewHtml}</div>
+                        <div class="file-info">
+                            <div class="file-name">${this.escapeHtml(item.file.name)}</div>
+                            <div class="file-size">${fileSizeMB} MB</div>
+                        </div>
+                        <div>${statusHtml}</div>
+                        <div>${actionHtml}</div>
+                    </div>
+                    ${progressHtml}
+                </div>
+            `;
+        }
+        
+        this.queueItems.innerHTML = html;
+        
+        // Attach event listeners
+        document.querySelectorAll('.cancel-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(btn.dataset.index);
+                this.cancelUpload(index);
+            });
+        });
+        
+        document.querySelectorAll('.retry-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const index = parseInt(btn.dataset.index);
+                this.retryUpload(index);
+            });
+        });
+    }
+    
+    updateStats() {
+        const totalSize = this.files.reduce((sum, item) => sum + item.file.size, 0);
+        const totalSizeMB = (totalSize / (1024 * 1024)).toFixed(1);
+        const pendingCount = this.files.filter(f => f.status === 'pending').length;
+        const uploadingCount = this.files.filter(f => f.status === 'uploading').length;
+        const completedCount = this.files.filter(f => f.status === 'completed').length;
+        const failedCount = this.files.filter(f => f.status === 'failed').length;
+        
+        this.queueStats.innerHTML = `
+            <span>${this.files.length} files</span>
+            <span>${totalSizeMB} MB total</span>
+            <span>${completedCount} completed</span>
+            <span>${failedCount} failed</span>
+        `;
+        
+        this.totalFilesSpan.textContent = this.files.length;
+    }
+    
+    showQueue() {
+        this.queueContainer.style.display = 'block';
+        this.progressContainer.style.display = 'none';
+    }
+    
+    showOverallProgress() {
+        this.progressContainer.style.display = 'block';
+        const total = this.files.length;
+        const completed = this.files.filter(f => f.status === 'completed').length;
+        const percent = (completed / total) * 100;
+        this.overallProgressBar.style.width = percent + '%';
+        this.completedFilesSpan.textContent = completed;
+    }
+    
+    async startUpload() {
+        if (this.isUploading) {
+            toast.warning('Upload already in progress');
+            return;
+        }
+        
+        const recipient = document.getElementById('recipient').value.trim();
+        if (!recipient) {
+            toast.error('Please enter a recipient username');
+            return;
+        }
+        
+        const pendingFiles = this.files.filter(f => f.status === 'pending' || f.status === 'failed');
+        if (pendingFiles.length === 0) {
+            toast.info('No files to upload');
+            return;
+        }
+        
+        this.isUploading = true;
+        this.completedCount = 0;
+        this.failedCount = 0;
+        this.showOverallProgress();
+        
+        // Reset failed files to pending for retry
+        this.files.forEach(f => {
+            if (f.status === 'failed') {
+                f.status = 'pending';
+                f.error = null;
+            }
+        });
+        
+        this.renderQueue();
+        
+        for (let i = 0; i < this.files.length; i++) {
+            const item = this.files[i];
+            if (item.status !== 'pending') continue;
+            
+            this.currentIndex = i;
+            const success = await this.uploadFile(item, recipient);
+            
+            if (success) {
+                this.completedCount++;
+            } else {
+                this.failedCount++;
+            }
+            
+            this.showOverallProgress();
+            this.updateStats();
+        }
+        
+        this.isUploading = false;
+        
+        if (this.completedCount > 0 && this.failedCount === 0) {
+            toast.success(`Successfully sent ${this.completedCount} file(s). Redirecting...`);
+            setTimeout(() => {
+                window.location.href = '/home';
+            }, 2000);
+        } else if (this.completedCount > 0 && this.failedCount > 0) {
+            toast.warning(`Sent ${this.completedCount} file(s), ${this.failedCount} failed. Retry failed files.`);
+        } else if (this.failedCount > 0) {
+            toast.error(`All ${this.failedCount} file(s) failed. Check errors and retry.`);
+        }
+    }
+    
+    async uploadFile(item, recipient) {
+        return new Promise((resolve) => {
+            item.status = 'uploading';
+            item.progress = 0;
+            this.renderQueue();
+            
+            const formData = new FormData();
+            formData.append('recipient', recipient);
+            formData.append('filename', item.file.name);
+            formData.append('file_size', item.file.size.toString());
+            formData.append('options', JSON.stringify({}));
+            formData.append('encryption_key', 'placeholder');
+            
+            // Encrypt file locally
+            this.encryptFile(item.file).then(encryptedBlob => {
+                formData.append('encrypted_file', encryptedBlob, 'encrypted.bin');
+                
+                const xhr = new XMLHttpRequest();
+                item.xhr = xhr;
+                
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percent = Math.round((e.loaded / e.total) * 100);
+                        item.progress = percent;
+                        const speed = (e.loaded / 1024 / 1024 / (Date.now() - item.startTime)) || 0;
+                        item.speed = speed.toFixed(1);
+                        this.renderQueue();
+                    }
+                });
+                
+                xhr.onload = () => {
+                    if (xhr.status === 200) {
+                        try {
+                            const result = JSON.parse(xhr.responseText);
+                            if (result.success) {
+                                item.status = 'completed';
+                                item.progress = 100;
+                                this.renderQueue();
+                                resolve(true);
+                            } else {
+                                item.status = 'failed';
+                                item.error = result.error || 'Upload failed';
+                                this.renderQueue();
+                                resolve(false);
+                            }
+                        } catch (e) {
+                            item.status = 'failed';
+                            item.error = 'Invalid server response';
+                            this.renderQueue();
+                            resolve(false);
+                        }
+                    } else {
+                        item.status = 'failed';
+                        item.error = `HTTP ${xhr.status}`;
+                        this.renderQueue();
+                        resolve(false);
+                    }
+                };
+                
+                xhr.onerror = () => {
+                    item.status = 'failed';
+                    item.error = 'Network error';
+                    this.renderQueue();
+                    resolve(false);
+                };
+                
+                item.startTime = Date.now();
+                xhr.open('POST', '/send/submit');
+                xhr.send(formData);
+            }).catch(() => {
+                item.status = 'failed';
+                item.error = 'Encryption failed';
+                this.renderQueue();
+                resolve(false);
+            });
+        });
+    }
+    
+    async encryptFile(file) {
+        const key = await crypto.subtle.generateKey(
+            { name: "AES-GCM", length: 256 },
+            true,
+            ["encrypt", "decrypt"]
+        );
+        
+        const fileData = await file.arrayBuffer();
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const encrypted = await crypto.subtle.encrypt(
+            { name: "AES-GCM", iv: iv },
+            key,
+            fileData
+        );
+        
+        const combined = new Uint8Array(iv.length + encrypted.byteLength);
+        combined.set(iv, 0);
+        combined.set(new Uint8Array(encrypted), iv.length);
+        
+        return new Blob([combined], { type: 'application/octet-stream' });
+    }
+    
+    cancelUpload(index) {
+        const item = this.files[index];
+        
+        if (item.status === 'uploading') {
+            if (confirm('Cancel this upload? The file will not be sent.')) {
+                if (item.xhr) {
+                    item.xhr.abort();
+                }
+                this.files.splice(index, 1);
+                this.renderQueue();
+                this.updateStats();
+                toast.info('Upload cancelled');
+            }
+        } else if (item.status === 'pending') {
+            if (confirm('Remove this file from queue?')) {
+                this.files.splice(index, 1);
+                this.renderQueue();
+                this.updateStats();
+                toast.info('File removed');
+            }
+        }
+        
+        if (this.files.length === 0) {
+            this.queueContainer.style.display = 'none';
+            this.progressContainer.style.display = 'none';
+        }
+    }
+    
+    retryUpload(index) {
+        const item = this.files[index];
+        if (item.status === 'failed') {
+            item.status = 'pending';
+            item.error = null;
+            this.renderQueue();
+            toast.info('File added back to queue');
+        }
+    }
+    
+    removeAll() {
+        const pendingCount = this.files.filter(f => f.status === 'pending' || f.status === 'failed').length;
+        if (pendingCount > 0 && confirm(`Remove all ${pendingCount} pending files from queue?`)) {
+            this.files = this.files.filter(f => f.status === 'completed' || f.status === 'uploading');
+            if (this.isUploading) {
+                const currentItem = this.files[this.currentIndex];
+                if (currentItem && currentItem.xhr) {
+                    currentItem.xhr.abort();
+                }
+                this.isUploading = false;
+            }
+            this.renderQueue();
+            this.updateStats();
+            toast.info('Pending files removed');
+        }
+    }
+    
+    clearCompleted() {
+        const completedCount = this.files.filter(f => f.status === 'completed').length;
+        if (completedCount > 0) {
+            this.files = this.files.filter(f => f.status !== 'completed');
+            this.renderQueue();
+            this.updateStats();
+            toast.info('Completed files cleared');
+        }
+        
+        if (this.files.length === 0) {
+            this.queueContainer.style.display = 'none';
+            this.progressContainer.style.display = 'none';
+        }
+    }
+    
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+}
+
+// Initialize upload queue
+const uploadQueue = new UploadQueue();
+</script>
+{% endblock %}

@@ -166,6 +166,7 @@
             <button class="modal-close" onclick="closeBatchRoleModal()">[X]</button>
         </div>
         <div class="modal-body">
+            <input type="hidden" id="batchRoleCsrf" value="{{ csrf_token }}">
             <p id="batchRoleCount">0 users selected</p>
             <div class="form-group">
                 <label>New Role:</label>
@@ -191,6 +192,7 @@
             <button class="modal-close" onclick="closeBatchBanModal()">[X]</button>
         </div>
         <div class="modal-body">
+            <input type="hidden" id="batchBanCsrf" value="{{ csrf_token }}">
             <p id="batchBanCount">0 users selected</p>
             <div class="form-group">
                 <label>Ban Reason:</label>
@@ -585,7 +587,7 @@
 }
 </style>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="/static/chart.umd.min.js"></script>
 <script>
 let userGrowthChart = null;
 let fileActivityChart = null;
@@ -597,6 +599,10 @@ let diskGauge = null;
 let selectedUsers = new Set();
 let currentPeriod = 30;
 let currentActivityType = 'uploads';
+
+function getCsrfToken() {
+    return document.querySelector('input[name="csrf_token"]')?.value || '{{ csrf_token }}';
+}
 
 // Initialize Charts
 function initCharts() {
@@ -858,7 +864,6 @@ function loadActivityHeatmap() {
 
 function renderHeatmap(activities) {
     const container = document.getElementById('activityHeatmap');
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const weeks = [];
     
     for (let i = 0; i < 7; i++) {
@@ -1006,15 +1011,19 @@ document.getElementById('batchBanBtn').addEventListener('click', () => {
 document.getElementById('confirmBatchBanBtn').addEventListener('click', () => {
     const reason = document.getElementById('batchBanReason').value;
     const userIds = Array.from(selectedUsers);
+    const csrfToken = document.getElementById('batchBanCsrf').value;
     
-    Promise.all(userIds.map(userId => 
-        fetch(`/admin/user/ban/${userId}`, {
+    Promise.all(userIds.map(userId => {
+        const formData = new FormData();
+        formData.append('reason', reason);
+        formData.append('csrf_token', csrfToken);
+        
+        return fetch(`/admin/user/ban/${userId}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'reason=' + encodeURIComponent(reason)
-        })
-    )).then(() => {
-        toast.success(`Banned ${userIds.length} users`);
+            body: formData
+        });
+    })).then(() => {
+        if (window.toast) window.toast.success(`Banned ${userIds.length} users`);
         closeBatchBanModal();
         loadUsers();
         loadStats();
@@ -1027,10 +1036,18 @@ document.getElementById('confirmBatchBanBtn').addEventListener('click', () => {
 document.getElementById('batchUnbanBtn').addEventListener('click', () => {
     if (confirm(`Unban ${selectedUsers.size} users?`)) {
         const userIds = Array.from(selectedUsers);
-        Promise.all(userIds.map(userId => 
-            fetch(`/admin/user/unban/${userId}`, { method: 'POST' })
-        )).then(() => {
-            toast.success(`Unbanned ${userIds.length} users`);
+        const csrfToken = getCsrfToken();
+        
+        Promise.all(userIds.map(userId => {
+            const formData = new FormData();
+            formData.append('csrf_token', csrfToken);
+            
+            return fetch(`/admin/user/unban/${userId}`, { 
+                method: 'POST',
+                body: formData
+            });
+        })).then(() => {
+            if (window.toast) window.toast.success(`Unbanned ${userIds.length} users`);
             loadUsers();
             loadStats();
             selectedUsers.clear();
@@ -1048,15 +1065,19 @@ document.getElementById('batchRoleBtn').addEventListener('click', () => {
 document.getElementById('confirmBatchRoleBtn').addEventListener('click', () => {
     const newRole = document.getElementById('batchNewRole').value;
     const userIds = Array.from(selectedUsers);
+    const csrfToken = document.getElementById('batchRoleCsrf').value;
     
-    Promise.all(userIds.map(userId => 
-        fetch(`/admin/user/role/${userId}`, {
+    Promise.all(userIds.map(userId => {
+        const formData = new FormData();
+        formData.append('role', newRole);
+        formData.append('csrf_token', csrfToken);
+        
+        return fetch(`/admin/user/role/${userId}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'role=' + newRole
-        })
-    )).then(() => {
-        toast.success(`Changed role for ${userIds.length} users`);
+            body: formData
+        });
+    })).then(() => {
+        if (window.toast) window.toast.success(`Changed role for ${userIds.length} users`);
         closeBatchRoleModal();
         loadUsers();
         selectedUsers.clear();
@@ -1068,10 +1089,18 @@ document.getElementById('confirmBatchRoleBtn').addEventListener('click', () => {
 document.getElementById('batchDeleteBtn').addEventListener('click', () => {
     if (confirm(`Permanently delete ${selectedUsers.size} users? This action cannot be undone.`)) {
         const userIds = Array.from(selectedUsers);
-        Promise.all(userIds.map(userId => 
-            fetch(`/admin/user/delete/${userId}`, { method: 'POST' })
-        )).then(() => {
-            toast.success(`Deleted ${userIds.length} users`);
+        const csrfToken = getCsrfToken();
+        
+        Promise.all(userIds.map(userId => {
+            const formData = new FormData();
+            formData.append('csrf_token', csrfToken);
+            
+            return fetch(`/admin/user/delete/${userId}`, { 
+                method: 'POST',
+                body: formData
+            });
+        })).then(() => {
+            if (window.toast) window.toast.success(`Deleted ${userIds.length} users`);
             loadUsers();
             loadStats();
             selectedUsers.clear();
@@ -1088,6 +1117,7 @@ function closeBatchRoleModal() {
 
 function closeBatchBanModal() {
     document.getElementById('batchBanModal').style.display = 'none';
+    document.getElementById('batchBanReason').value = '';
 }
 
 function showUserDetails(userId) {
@@ -1098,12 +1128,15 @@ function showBanModal(userId, username) {
     if (confirm(`Ban user "${username}"?`)) {
         const reason = prompt('Enter ban reason:');
         if (reason) {
+            const formData = new FormData();
+            formData.append('reason', reason);
+            formData.append('csrf_token', getCsrfToken());
+            
             fetch(`/admin/user/ban/${userId}`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: 'reason=' + encodeURIComponent(reason)
+                body: formData
             }).then(() => {
-                toast.success(`User ${username} banned`);
+                if (window.toast) window.toast.success(`User ${username} banned`);
                 loadUsers();
                 loadStats();
             });
@@ -1113,24 +1146,32 @@ function showBanModal(userId, username) {
 
 function unbanUser(userId, username) {
     if (confirm(`Unban user "${username}"?`)) {
-        fetch(`/admin/user/unban/${userId}`, { method: 'POST' })
-            .then(() => {
-                toast.success(`User ${username} unbanned`);
-                loadUsers();
-                loadStats();
-            });
+        const formData = new FormData();
+        formData.append('csrf_token', getCsrfToken());
+        
+        fetch(`/admin/user/unban/${userId}`, { 
+            method: 'POST',
+            body: formData
+        }).then(() => {
+            if (window.toast) window.toast.success(`User ${username} unbanned`);
+            loadUsers();
+            loadStats();
+        });
     }
 }
 
 function showRoleModal(userId, username, currentRole) {
     const newRole = prompt(`Change role for "${username}" (current: ${currentRole})\nOptions: user, pro, premium`, currentRole);
     if (newRole && ['user', 'pro', 'premium'].includes(newRole)) {
+        const formData = new FormData();
+        formData.append('role', newRole);
+        formData.append('csrf_token', getCsrfToken());
+        
         fetch(`/admin/user/role/${userId}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'role=' + newRole
+            body: formData
         }).then(() => {
-            toast.success(`Role changed to ${newRole}`);
+            if (window.toast) window.toast.success(`Role changed to ${newRole}`);
             loadUsers();
         });
     }
@@ -1138,12 +1179,17 @@ function showRoleModal(userId, username, currentRole) {
 
 function deleteUser(userId, username) {
     if (confirm(`Permanently delete user "${username}"? This will delete ALL their files, messages, and data. This action cannot be undone.`)) {
-        fetch(`/admin/user/delete/${userId}`, { method: 'POST' })
-            .then(() => {
-                toast.success(`User ${username} and all associated data deleted`);
-                loadUsers();
-                loadStats();
-            });
+        const formData = new FormData();
+        formData.append('csrf_token', getCsrfToken());
+        
+        fetch(`/admin/user/delete/${userId}`, { 
+            method: 'POST',
+            body: formData
+        }).then(() => {
+            if (window.toast) window.toast.success(`User ${username} and all associated data deleted`);
+            loadUsers();
+            loadStats();
+        });
     }
 }
 
@@ -1192,7 +1238,7 @@ document.getElementById('refreshStatsBtn').addEventListener('click', () => {
     loadStorageTrend();
     loadActivityHeatmap();
     loadUsers();
-    toast.info('Dashboard refreshed');
+    if (window.toast) window.toast.info('Dashboard refreshed');
 });
 
 // Auto-refresh every 30 seconds

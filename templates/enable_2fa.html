@@ -38,6 +38,8 @@
         <h3>Step 3: Verify Setup</h3>
         <p>Enter the 6-digit code from your authenticator app to enable 2FA.</p>
         <form method="post" action="/profile/enable-2fa">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            
             <div class="form-group">
                 <label for="code">Verification Code</label>
                 <input type="text" id="code" name="code" required placeholder="000000">

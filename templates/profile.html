@@ -227,6 +227,7 @@
     </div>
 </div>
 
+<!-- Edit Bio Modal -->
 <div id="editBioModal" class="modal" style="display: none;">
     <div class="modal-content">
         <div class="modal-header">
@@ -234,6 +235,7 @@
             <button class="modal-close" onclick="closeEditBioModal()">[X]</button>
         </div>
         <div class="modal-body">
+            <input type="hidden" id="bioCsrfToken" value="{{ csrf_token }}">
             <div class="form-group">
                 <label for="bioText">Bio (max 200 characters)</label>
                 <textarea id="bioText" rows="4" maxlength="200" placeholder="Tell others about yourself...">{{ user.bio or '' }}</textarea>
@@ -247,6 +249,7 @@
     </div>
 </div>
 
+<!-- Change Password Modal -->
 <div id="changePasswordModal" class="modal" style="display: none;">
     <div class="modal-content">
         <div class="modal-header">
@@ -254,6 +257,7 @@
             <button class="modal-close" onclick="closeChangePasswordModal()">[X]</button>
         </div>
         <div class="modal-body">
+            <input type="hidden" id="passwordCsrfToken" value="{{ csrf_token }}">
             <div class="form-group">
                 <label for="currentPassword">Current Password</label>
                 <input type="password" id="currentPassword" required>
@@ -275,6 +279,7 @@
     </div>
 </div>
 
+<!-- Change PIN Modal -->
 <div id="changePinModal" class="modal" style="display: none;">
     <div class="modal-content">
         <div class="modal-header">
@@ -282,6 +287,7 @@
             <button class="modal-close" onclick="closeChangePinModal()">[X]</button>
         </div>
         <div class="modal-body">
+            <input type="hidden" id="pinCsrfToken" value="{{ csrf_token }}">
             <div class="form-group">
                 <label for="currentPin">Current PIN (6 digits)</label>
                 <input type="password" id="currentPin" maxlength="6" pattern="[0-9]{6}" required>
@@ -302,6 +308,7 @@
     </div>
 </div>
 
+<!-- Delete Account Modal -->
 <div id="deleteAccountModal" class="modal" style="display: none;">
     <div class="modal-content">
         <div class="modal-header">
@@ -309,6 +316,7 @@
             <button class="modal-close" onclick="closeDeleteAccountModal()">[X]</button>
         </div>
         <div class="modal-body">
+            <input type="hidden" id="deleteCsrfToken" value="{{ csrf_token }}">
             <div class="warning-text">
                 <p>Warning: This action is permanent and cannot be undone. All your files and data will be permanently deleted.</p>
             </div>
@@ -773,6 +781,10 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function getCsrfToken() {
+    return document.querySelector('input[name="csrf_token"]')?.value || '{{ csrf_token }}';
+}
+
 // Subscription countdown timer
 function updateSubscriptionCountdown() {
     const countdownSpan = document.getElementById('subscriptionCountdown');
@@ -809,10 +821,14 @@ if (themeToggle) {
         const newTheme = this.checked ? 'dark' : 'light';
         document.body.className = newTheme;
         localStorage.setItem('theme', newTheme);
+        
+        const formData = new FormData();
+        formData.append('theme', newTheme);
+        formData.append('csrf_token', getCsrfToken());
+        
         fetch('/profile/change-theme', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'theme=' + newTheme
+            body: formData
         });
     });
 }
@@ -822,10 +838,13 @@ const readReceiptsToggle = document.getElementById('readReceiptsToggle');
 if (readReceiptsToggle) {
     readReceiptsToggle.addEventListener('change', function() {
         const enabled = this.checked;
+        const formData = new FormData();
+        formData.append('enabled', enabled);
+        formData.append('csrf_token', getCsrfToken());
+        
         fetch('/profile/read-receipts', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'enabled=' + enabled
+            body: formData
         }).then(res => res.json()).then(data => {
             if (!data.success) {
                 if (window.toast) {
@@ -923,16 +942,22 @@ function loadBlockedUsers() {
                 container.querySelectorAll('.unblock-btn').forEach(btn => {
                     btn.addEventListener('click', () => {
                         const userId = btn.dataset.userId;
-                        fetch('/chat/unblock/' + userId, { method: 'POST' })
-                            .then(res => res.json())
-                            .then(data => {
-                                if (data.success) {
-                                    if (window.toast) window.toast.success('User unblocked');
-                                    loadBlockedUsers();
-                                } else {
-                                    if (window.toast) window.toast.error(escapeHtml(data.error));
-                                }
-                            });
+                        const formData = new FormData();
+                        formData.append('csrf_token', getCsrfToken());
+                        
+                        fetch('/chat/unblock/' + userId, { 
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                if (window.toast) window.toast.success('User unblocked');
+                                loadBlockedUsers();
+                            } else {
+                                if (window.toast) window.toast.error(escapeHtml(data.error));
+                            }
+                        });
                     });
                 });
             } else {
@@ -982,6 +1007,7 @@ document.getElementById('saveBioBtn')?.addEventListener('click', () => {
     
     const formData = new FormData();
     formData.append('bio', bio);
+    formData.append('csrf_token', document.getElementById('bioCsrfToken').value);
     
     fetch('/api/user/bio', {
         method: 'POST',
@@ -1042,6 +1068,7 @@ document.getElementById('submitPasswordChangeBtn')?.addEventListener('click', ()
     formData.append('current_password', current);
     formData.append('new_password', newPass);
     formData.append('confirm_password', confirm);
+    formData.append('csrf_token', document.getElementById('passwordCsrfToken').value);
     
     fetch('/profile/change-password', {
         method: 'POST',
@@ -1096,6 +1123,7 @@ document.getElementById('submitPinChangeBtn')?.addEventListener('click', () => {
     formData.append('current_pin', current);
     formData.append('new_pin', newPin);
     formData.append('confirm_pin', confirm);
+    formData.append('csrf_token', document.getElementById('pinCsrfToken').value);
     
     fetch('/profile/change-pin', {
         method: 'POST',
@@ -1142,11 +1170,12 @@ document.getElementById('confirmDeleteBtn')?.addEventListener('click', () => {
     const formData = new FormData();
     formData.append('password', password);
     formData.append('confirm', confirm);
+    formData.append('csrf_token', document.getElementById('deleteCsrfToken').value);
     
     fetch('/profile/delete-account', {
         method: 'POST',
         body: formData
-    }).then(res => {
+    }).then(() => {
         window.location.href = '/';
     });
 });
@@ -1161,6 +1190,21 @@ document.getElementById('confirmLogoutBtn')?.addEventListener('click', () => {
 
 document.getElementById('cancelLogoutBtn')?.addEventListener('click', () => {
     showSection('myaccount');
+});
+
+// Disable 2FA button
+document.getElementById('disable2faBtn')?.addEventListener('click', () => {
+    if (confirm('Disable Two-Factor Authentication? This will make your account less secure.')) {
+        const formData = new FormData();
+        formData.append('csrf_token', getCsrfToken());
+        
+        fetch('/profile/disable-2fa', {
+            method: 'POST',
+            body: formData
+        }).then(() => {
+            window.location.reload();
+        });
+    }
 });
 
 // Start countdown timer

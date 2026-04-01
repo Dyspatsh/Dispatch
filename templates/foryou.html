@@ -88,24 +88,30 @@ function declineFile(fileId) {
 
 function blockSender(userId, username) {
     if (confirm('Block ' + escapeHtml(username) + '? You will no longer receive files or chat invitations from this user.')) {
-        fetch('/chat/block/' + userId, { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    if (window.toast) {
-                        window.toast.success('User blocked successfully');
-                    } else {
-                        alert('User blocked successfully');
-                    }
-                    location.reload();
+        const formData = new FormData();
+        formData.append('csrf_token', '{{ csrf_token }}');
+        
+        fetch('/chat/block/' + userId, { 
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                if (window.toast) {
+                    window.toast.success('User blocked successfully');
                 } else {
-                    if (window.toast) {
-                        window.toast.error('Error: ' + escapeHtml(data.error || 'Failed to block user'));
-                    } else {
-                        alert('Error: ' + (data.error || 'Failed to block user'));
-                    }
+                    alert('User blocked successfully');
                 }
-            });
+                location.reload();
+            } else {
+                if (window.toast) {
+                    window.toast.error('Error: ' + escapeHtml(data.error || 'Failed to block user'));
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to block user'));
+                }
+            }
+        });
     }
 }
 </script>

@@ -17,6 +17,8 @@
     </div>
     {% else %}
     <form method="post" action="/profile/change-pin">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        
         <div class="form-group">
             <label for="current_pin">Current PIN (6 digits)</label>
             <input type="password" id="current_pin" name="current_pin" maxlength="6" pattern="[0-9]{6}" required>

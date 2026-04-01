@@ -7,6 +7,8 @@
     <h1>Register</h1>
     
     <form id="registerForm" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        
         <div class="form-group">
             <label for="username">Username</label>
             <input type="text" id="username" name="username" required minlength="3" maxlength="16" pattern="[a-zA-Z0-9_]+">
@@ -161,6 +163,7 @@
         formData.append('password', password);
         formData.append('pin', pin);
         formData.append('terms', true);
+        formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
         
         const submitBtn = this.querySelector('button[type="submit"]');
         const originalText = submitBtn.textContent;
@@ -182,7 +185,6 @@
                 if (window.toast) {
                     window.toast.success('Account created successfully!');
                 }
-                // Show recovery phrase in a modal or redirect to success page
                 alert('Account created!\n\nYour Recovery Phrase:\n' + data.recovery_phrase + '\n\nSAVE THIS PHRASE! You will need it to recover your account.');
                 window.location.href = '/login';
             } else {
@@ -247,7 +249,6 @@ body.dark .recovery-phrase {
     border-color: #2ecc71;
 }
 
-/* Modern Checkbox Styles */
 .terms-group {
     margin: 1.5rem 0;
 }

@@ -12,6 +12,8 @@
     {% endif %}
     
     <form method="post" action="/profile/delete-account">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        
         <div class="form-group">
             <label for="password">Enter your password to confirm</label>
             <input type="password" id="password" name="password" required>

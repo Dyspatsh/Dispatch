@@ -1,77 +1,53 @@
-# Virtual Environment
-venv/
-env/
-ENV/
-.env
-.venv
-
-# Python Cache
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.pytest_cache/
-.coverage
-htmlcov/
+.Python
+venv/
+env/
+ENV/
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Logs
-logs/
-*.log
-*.log.*
-backups/
-*.backup
-*.bak
-
-# Uploads
-uploads/
-uploads/*.enc
-voice_messages/
-
-# Environment Variables
+# Environment
 .env
 .env.local
-.env.production
+
+# Logs
+*.log
+logs/
+*.pid
+
+# Uploads
+uploads/*.enc
+uploads/*.tmp
+
+# Backups
+backups/
+*.sql
+*.sql.gz
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-.DS_Store
 
 # OS
-Thumbs.db
 .DS_Store
+Thumbs.db
 
-# Backup Files
-*.backup
-*.bak
-*.old
-*.orig
-
-# Temporary Files
+# Temporary files
 *.tmp
-*.temp
-*.pid
-
-# Testing
-coverage.xml
-.tox/
-.mypy_cache/
-.ruff_cache/
-
-# Node (if any)
-node_modules/
-npm-debug.log
-
-# Logs directory
-/home/dispatch/dyspatch/logs/
-/home/dispatch/dyspatch/backups/
-*.save
-*.save
+*.bak
+*.backup
+*.corrupted
+*.new
+test_*.py
+check_*.py
+add_*.py
+fix_*.py

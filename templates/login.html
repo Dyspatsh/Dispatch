@@ -13,6 +13,8 @@
     {% endif %}
     
     <form method="post" action="/login">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        
         <div class="form-group">
             <label for="username">Username</label>
             <input type="text" id="username" name="username" required minlength="3" maxlength="16" pattern="[a-zA-Z0-9_]+">
@@ -38,7 +40,6 @@
 </div>
 
 <script>
-    // Convert any error messages to toast notifications
     document.addEventListener('DOMContentLoaded', function() {
         const errorDiv = document.querySelector('.error-message');
         if (errorDiv && window.toast) {
@@ -49,7 +50,6 @@
             }
         }
         
-        // Also check for success messages from URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const successMsg = urlParams.get('success');
         if (successMsg && window.toast) {
