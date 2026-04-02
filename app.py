@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Form, Depends, File as FastAPIFile, Upload
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, desc, and_
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -17,6 +17,7 @@ import io
 import base64
 import psutil
 import logging
+import hashlib
 from dotenv import load_dotenv
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -26,11 +27,11 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
-from database import get_db, User, File, Payment, Session as DBSession, ChatConversation, ChatMessage, BlockedUser, LoginHistory, SecurityLog, CSRFToken, FailedLoginAttempt
+from database import get_db, User, File, Payment, Session as DBSession, ChatConversation, ChatMessage, BlockedUser, LoginHistory, SecurityLog, CSRFToken, FailedLoginAttempt, hash_ip_address
 from chat import router as chat_router
 from roles import router as roles_router
 
-# Set logging to WARNING for production (reduces verbosity)
+# Set logging to WARNING for production
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
@@ -41,30 +42,15 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY must be set in .env file")
 
+UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/home/dispatch/dyspatch/uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 app = FastAPI(title="Dispatch")
 
+# Rate limiter with per-IP tracking
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    
-    # ADD HSTS - tells browsers to always use HTTPS
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
-    
-    response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
-    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
-    response.headers["Onion-Location"] = "https://pladaibgpkuswvqosgdszdtbgmxkfz55co66c4pmxg3ldmvyw2w45zyd.onion/"
-    return response
 
 app.include_router(chat_router)
 app.include_router(roles_router)
@@ -72,8 +58,9 @@ app.include_router(roles_router)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
-UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/home/dispatch/dyspatch/uploads")
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+# ============================================
+# ALLOWED FILE TYPES
+# ============================================
 
 ALLOWED_EXTENSIONS = {
     'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mp3', 'zip', '7z', 'tar', 'gz',
@@ -90,7 +77,6 @@ ALLOWED_MIME_TYPES = {
     'text/xml', 'text/markdown', 'text/x-python', 'text/javascript', 'text/css'
 }
 
-# Extension to MIME type mapping for validation
 EXTENSION_MIME_MAP = {
     'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
     'png': 'image/png', 'gif': 'image/gif',
@@ -107,26 +93,21 @@ EXTENSION_MIME_MAP = {
     'css': 'text/css', 'html': 'text/html'
 }
 
-def validate_file_type(filename: str, content_type: str = None) -> tuple:
-    """Validate file type with extension and MIME type checking"""
-    ext = filename.split('.')[-1].lower() if '.' in filename else ''
-    
-    # Extension validation
-    if ext not in ALLOWED_EXTENSIONS:
-        return False, f"File extension .{ext} is not allowed"
-    
-    # MIME type validation
-    if content_type and content_type not in ALLOWED_MIME_TYPES:
-        return False, f"File type {content_type} is not allowed"
-    
-    # Verify MIME type matches extension (critical security check!)
-    if ext in EXTENSION_MIME_MAP and content_type:
-        expected_mime = EXTENSION_MIME_MAP[ext]
-        # Allow text/plain for many text-based files
-        if content_type != expected_mime and not content_type.startswith('text/'):
-            return False, f"File extension .{ext} does not match content type {content_type}"
-    
-    return True, ""
+# ============================================
+# HELPER FUNCTIONS
+# ============================================
+
+def get_client_ip(request: Request) -> str:
+    """Extract client IP from request (handles proxies)"""
+    if "x-forwarded-for" in request.headers:
+        return request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+def escape_html(text: str) -> str:
+    """Escape HTML special characters to prevent XSS attacks"""
+    if not text:
+        return ""
+    return html.escape(text)
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
@@ -138,12 +119,25 @@ def generate_recovery_phrase() -> str:
     chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     return ''.join(secrets.choice(chars) for _ in range(64))
 
-# FIXED: Proper HTML escaping using Python's built-in html.escape
-def escape_html(text: str) -> str:
-    """Escape HTML special characters to prevent XSS attacks"""
-    if not text:
-        return ""
-    return html.escape(text)
+def generate_recovery_codes() -> list:
+    return [secrets.token_hex(4).upper() for _ in range(10)]
+
+def hash_recovery_codes(codes: list) -> list:
+    return [hash_password(code) for code in codes]
+
+def verify_recovery_code(db: Session, user_id: int, code: str) -> bool:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.recovery_codes_hash:
+        return False
+    hashed_codes = json.loads(user.recovery_codes_hash)
+    code_upper = code.upper()
+    for hashed_code in hashed_codes:
+        if verify_password(code_upper, hashed_code):
+            hashed_codes.remove(hashed_code)
+            user.recovery_codes_hash = json.dumps(hashed_codes)
+            db.commit()
+            return True
+    return False
 
 def derive_key_from_password(password: str, salt: bytes) -> bytes:
     kdf = PBKDF2HMAC(
@@ -171,7 +165,33 @@ def decrypt_aes_key(encrypted_key_data: bytes, user_password: str, salt: bytes, 
     return decryptor.update(encrypted_key_data) + decryptor.finalize()
 
 def sanitize_filename(filename: str) -> str:
-    return "".join(c for c in filename if c.isalnum() or c in "._- ")
+    """Sanitize filename to prevent path traversal attacks"""
+    if not filename:
+        return "file"
+    filename = filename.replace('/', '_').replace('\\', '_')
+    filename = filename.replace('\x00', '')
+    filename = re.sub(r'\.\.', '', filename)
+    safe_chars = re.compile(r'[^a-zA-Z0-9._\- ]')
+    filename = safe_chars.sub('_', filename)
+    filename = filename.strip()
+    if not filename or filename == '':
+        filename = 'file'
+    if len(filename) > 255:
+        name, ext = filename.rsplit('.', 1) if '.' in filename else (filename, '')
+        filename = name[:250] + ('.' + ext[:4] if ext else '')
+    return filename
+
+def validate_file_type(filename: str, content_type: str = None) -> tuple:
+    ext = filename.split('.')[-1].lower() if '.' in filename else ''
+    if ext not in ALLOWED_EXTENSIONS:
+        return False, f"File extension .{ext} is not allowed"
+    if content_type and content_type not in ALLOWED_MIME_TYPES:
+        return False, f"File type {content_type} is not allowed"
+    if ext in EXTENSION_MIME_MAP and content_type:
+        expected_mime = EXTENSION_MIME_MAP[ext]
+        if content_type != expected_mime and not content_type.startswith('text/'):
+            return False, f"File extension .{ext} does not match content type {content_type}"
+    return True, ""
 
 def validate_username(username: str) -> tuple:
     if len(username) < 3:
@@ -182,19 +202,26 @@ def validate_username(username: str) -> tuple:
         return False, "Username can only contain letters, numbers, and underscores"
     return True, ""
 
-# FIXED: Stronger password validation
-def validate_password(password: str) -> tuple:
+def validate_password(password: str, username: str = None) -> tuple:
     """Validate password strength with modern requirements"""
-    # Minimum length - no upper limit (let users use passphrases)
     if len(password) < 12:
         return False, "Password must be at least 12 characters"
+    if len(password) > 128:
+        return False, "Password cannot exceed 128 characters"
     
-    # Check for common weak patterns
-    common_patterns = ['password', '123456', 'qwerty', 'abc123', 'admin', 'welcome', 'letmein', 'monkey', 'dragon']
+    common_patterns = ['password', '123456', 'qwerty', 'abc123', 'admin', 'welcome', 
+                       'letmein', 'monkey', 'dragon', 'football', 'baseball', 'login',
+                       'master', 'hello', 'google', 'passw0rd', 'password123']
     if any(pattern in password.lower() for pattern in common_patterns):
         return False, "Password contains common weak pattern"
     
-    # Require at least 3 of 4 character types
+    if username and username.lower() in password.lower():
+        return False, "Password cannot contain your username"
+    
+    keyboard_patterns = ['qwerty', 'asdfgh', 'zxcvbn', '123456', 'abcdef', 'qwertyuiop', 'asdfghjkl']
+    if any(pattern in password.lower() for pattern in keyboard_patterns):
+        return False, "Password contains sequential keyboard pattern"
+    
     has_upper = bool(re.search(r'[A-Z]', password))
     has_lower = bool(re.search(r'[a-z]', password))
     has_digit = bool(re.search(r'[0-9]', password))
@@ -205,9 +232,13 @@ def validate_password(password: str) -> tuple:
     if types_found < 3:
         return False, "Password must contain at least 3 of: uppercase letters, lowercase letters, numbers, symbols"
     
-    # Check for repeated characters (no more than 3 in a row)
     if re.search(r'(.)\1{3,}', password):
         return False, "Password cannot have 4 or more repeated characters in a row"
+    
+    for i in range(10):
+        sequential = ''.join(str((j % 10)) for j in range(i, i+4))
+        if sequential in password:
+            return False, "Password cannot contain sequential numbers"
     
     return True, ""
 
@@ -243,57 +274,6 @@ def validate_csrf_token(token: str, user_id: int, db: Session) -> bool:
         return True
     return False
 
-def log_security_event(db: Session, user_id: int, action: str, action_type: str, details: str = None, request: Request = None):
-    ip_address = None
-    user_agent = None
-    if request:
-        if "x-forwarded-for" in request.headers:
-            ip_address = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        else:
-            ip_address = request.client.host if request.client else None
-        user_agent = request.headers.get("user-agent")
-    
-    log = SecurityLog(
-        user_id=user_id,
-        action=action,
-        action_type=action_type,
-        details=details,
-        ip_address=ip_address,
-        user_agent=user_agent
-    )
-    db.add(log)
-    db.commit()
-
-def record_failed_login(db: Session, username: str):
-    now = datetime.utcnow()
-    attempt = db.query(FailedLoginAttempt).filter(FailedLoginAttempt.username == username).first()
-    if not attempt:
-        attempt = FailedLoginAttempt(username=username, attempt_count=1, last_attempt=now)
-        db.add(attempt)
-    else:
-        attempt.attempt_count += 1
-        attempt.last_attempt = now
-        if attempt.attempt_count >= 5:
-            attempt.lock_until = now + timedelta(minutes=30)
-    db.commit()
-
-def reset_login_attempts(db: Session, username: str):
-    attempt = db.query(FailedLoginAttempt).filter(FailedLoginAttempt.username == username).first()
-    if attempt:
-        db.delete(attempt)
-        db.commit()
-
-def check_login_lockout(db: Session, username: str) -> tuple:
-    attempt = db.query(FailedLoginAttempt).filter(FailedLoginAttempt.username == username).first()
-    if attempt and attempt.lock_until and datetime.utcnow() < attempt.lock_until:
-        remaining = int((attempt.lock_until - datetime.utcnow()).total_seconds() / 60)
-        return True, f"Account locked. Try again in {remaining} minutes"
-    return False, ""
-
-def is_user_blocked(db: Session, user_id: int, target_id: int) -> bool:
-    block = db.query(BlockedUser).filter(BlockedUser.user_id == target_id, BlockedUser.blocked_user_id == user_id).first()
-    return block is not None
-
 def create_session(db: Session, user_id: int, twofa_verified: bool = False) -> str:
     session_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(days=7)
@@ -322,37 +302,117 @@ def get_current_user(db: Session, session_token: str = None):
 async def get_user_from_session(request: Request, db: Session = Depends(get_db), session_token: str = Cookie(None)):
     return get_current_user(db, session_token)
 
-def generate_recovery_codes() -> list:
-    return [secrets.token_hex(4).upper() for _ in range(10)]
+def log_security_event(db: Session, user_id: int, action: str, action_type: str, details: str = None, request: Request = None):
+    ip_hash = None
+    user_agent = None
+    if request:
+        client_ip = get_client_ip(request)
+        ip_hash = hash_ip_address(client_ip) if client_ip != "unknown" else None
+        user_agent = request.headers.get("user-agent")
+    
+    log = SecurityLog(
+        user_id=user_id,
+        action=action,
+        action_type=action_type,
+        details=details,
+        ip_hash=ip_hash,
+        user_agent=user_agent
+    )
+    db.add(log)
+    db.commit()
 
-def hash_recovery_codes(codes: list) -> list:
-    return [hash_password(code) for code in codes]
+def record_failed_login(db: Session, username: str, request: Request = None):
+    now = datetime.utcnow()
+    ip_hash = None
+    if request:
+        client_ip = get_client_ip(request)
+        ip_hash = hash_ip_address(client_ip) if client_ip != "unknown" else None
+    
+    attempt = db.query(FailedLoginAttempt).filter(
+        FailedLoginAttempt.username == username,
+        FailedLoginAttempt.ip_hash == ip_hash
+    ).first()
+    
+    if not attempt:
+        attempt = FailedLoginAttempt(
+            username=username, 
+            attempt_count=1, 
+            last_attempt=now,
+            ip_hash=ip_hash
+        )
+        db.add(attempt)
+    else:
+        attempt.attempt_count += 1
+        attempt.last_attempt = now
+        if attempt.attempt_count >= 5:
+            attempt.lock_until = now + timedelta(minutes=30)
+    db.commit()
 
-def verify_recovery_code(db: Session, user_id: int, code: str) -> bool:
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user or not user.recovery_codes_hash:
-        return False
-    hashed_codes = json.loads(user.recovery_codes_hash)
-    code_upper = code.upper()
-    for hashed_code in hashed_codes:
-        if verify_password(code_upper, hashed_code):
-            hashed_codes.remove(hashed_code)
-            user.recovery_codes_hash = json.dumps(hashed_codes)
-            db.commit()
-            return True
-    return False
+def reset_login_attempts(db: Session, username: str):
+    attempt = db.query(FailedLoginAttempt).filter(FailedLoginAttempt.username == username).first()
+    if attempt:
+        db.delete(attempt)
+        db.commit()
+
+def check_login_lockout(db: Session, username: str) -> tuple:
+    attempt = db.query(FailedLoginAttempt).filter(FailedLoginAttempt.username == username).first()
+    if attempt and attempt.lock_until and datetime.utcnow() < attempt.lock_until:
+        remaining = int((attempt.lock_until - datetime.utcnow()).total_seconds() / 60)
+        return True, f"Account locked. Try again in {remaining} minutes"
+    return False, ""
+
+def is_user_blocked(db: Session, user_id: int, target_id: int) -> bool:
+    block = db.query(BlockedUser).filter(BlockedUser.user_id == target_id, BlockedUser.blocked_user_id == user_id).first()
+    return block is not None
 
 def validate_days_param(days: int, max_days: int = 365) -> int:
-    """Validate and sanitize days parameter for admin endpoints"""
     try:
         days = int(days)
         if days < 1:
-            return 30  # default
+            return 30
         if days > max_days:
             return max_days
         return days
     except (ValueError, TypeError):
         return 30
+
+# ============================================
+# MIDDLEWARE
+# ============================================
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self' ws: wss:; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    
+    onion_address = os.getenv("ONION_ADDRESS")
+    if onion_address:
+        response.headers["Onion-Location"] = f"https://{onion_address}/"
+    
+    return response
+
+# ============================================
+# PAGE ROUTES
+# ============================================
 
 @app.get("/")
 async def root():
@@ -370,7 +430,6 @@ async def home_page(request: Request, user = Depends(get_user_from_session)):
 async def foryou_page(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    from sqlalchemy.orm import joinedload
     pending_files = db.query(File).options(joinedload(File.sender)).filter(File.recipient_id == user.id, File.status == "pending").all()
     return templates.TemplateResponse("foryou.html", {"request": request, "user": user, "pending_files": pending_files})
 
@@ -378,7 +437,6 @@ async def foryou_page(request: Request, user = Depends(get_user_from_session), d
 async def history_page(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    from sqlalchemy.orm import joinedload
     from roles import get_history_retention_days
     
     retention_days = get_history_retention_days(user.role)
@@ -410,9 +468,8 @@ async def recovery_page(request: Request, user = Depends(get_user_from_session))
     return templates.TemplateResponse("recovery.html", {"request": request, "user": user})
 
 @app.post("/recovery")
-@limiter.limit("3/hour")  # FIXED: Enabled rate limiting
+@limiter.limit("3/hour")
 async def recovery_submit(request: Request, recovery_phrase: str = Form(...), new_username: str = Form(None), new_password: str = Form(...), confirm_password: str = Form(...), new_pin: str = Form(...), confirm_pin: str = Form(...), db: Session = Depends(get_db)):
-
     recovery_phrase = escape_html(recovery_phrase)
     new_username = escape_html(new_username) if new_username else None
     
@@ -429,7 +486,7 @@ async def recovery_submit(request: Request, recovery_phrase: str = Form(...), ne
     if new_password != confirm_password:
         return templates.TemplateResponse("recovery.html", {"request": request, "error": "New passwords do not match"})
     
-    valid, error = validate_password(new_password)
+    valid, error = validate_password(new_password, new_username)
     if not valid:
         return templates.TemplateResponse("recovery.html", {"request": request, "error": error})
     
@@ -455,9 +512,7 @@ async def recovery_submit(request: Request, recovery_phrase: str = Form(...), ne
         user.username = new_username
     
     db.commit()
-    
     log_security_event(db, user.id, "Account recovered", "account_recovery", f"Password and PIN reset", request)
-    
     return templates.TemplateResponse("recovery.html", {"request": request, "success": "Account recovered successfully! You can now log in with your new credentials."})
 
 @app.get("/register", response_class=HTMLResponse)
@@ -465,11 +520,9 @@ async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
 @app.post("/register")
-@limiter.limit("5/hour")  # FIXED: Enabled rate limiting
+@limiter.limit("5/hour")
 async def register(request: Request, username: str = Form(...), password: str = Form(...), pin: str = Form(...), terms: bool = Form(False), db: Session = Depends(get_db)):
-
     username = escape_html(username)
-    
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     
     if not terms:
@@ -483,7 +536,7 @@ async def register(request: Request, username: str = Form(...), password: str = 
             return {"success": False, "error": error}
         return templates.TemplateResponse("register.html", {"request": request, "error": error})
     
-    valid, error = validate_password(password)
+    valid, error = validate_password(password, username)
     if not valid:
         if is_ajax:
             return {"success": False, "error": error}
@@ -532,11 +585,9 @@ async def login_page(request: Request, user = Depends(get_user_from_session)):
     return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/login")
-@limiter.limit("5/minute")  # FIXED: Enabled rate limiting
+@limiter.limit("5/minute")
 async def login(request: Request, username: str = Form(...), password: str = Form(...), pin: str = Form(...), db: Session = Depends(get_db)):
-
     username = escape_html(username)
-    
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     
     locked, message = check_login_lockout(db, username)
@@ -547,21 +598,21 @@ async def login(request: Request, username: str = Form(...), password: str = For
     
     user = db.query(User).filter(func.lower(User.username) == username.lower()).first()
     if not user:
-        record_failed_login(db, username)
+        record_failed_login(db, username, request)
         log_security_event(db, 0, f"Failed login attempt for {username}", "login_failed", "Invalid username", request)
         if is_ajax:
             return {"success": False, "error": "Invalid credentials"}
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
     
     if not verify_password(password, user.password_hash):
-        record_failed_login(db, username)
+        record_failed_login(db, username, request)
         log_security_event(db, user.id, "Failed login attempt", "login_failed", "Invalid password", request)
         if is_ajax:
             return {"success": False, "error": "Invalid credentials"}
         return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid credentials"})
     
     if not verify_password(pin, user.pin_hash):
-        record_failed_login(db, username)
+        record_failed_login(db, username, request)
         log_security_event(db, user.id, "Failed login attempt", "login_failed", "Invalid PIN", request)
         if is_ajax:
             return {"success": False, "error": "Invalid credentials"}
@@ -575,7 +626,9 @@ async def login(request: Request, username: str = Form(...), password: str = For
     
     reset_login_attempts(db, username)
     
-    login_record = LoginHistory(user_id=user.id)
+    client_ip = get_client_ip(request)
+    ip_hash = hash_ip_address(client_ip) if client_ip != "unknown" else None
+    login_record = LoginHistory(user_id=user.id, ip_hash=ip_hash)
     db.add(login_record)
     db.commit()
     
@@ -584,7 +637,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
         if is_ajax:
             return {"success": True, "redirect": "/2fa-verify", "twofa": True}
         response = RedirectResponse(url="/2fa-verify", status_code=303)
-        response.set_cookie(key="session_token", value="", httponly=True, secure=True, samesite="strict", max_age=300)  # FIXED: samesite=strict
+        response.set_cookie(key="session_token", value="", httponly=True, secure=True, samesite="strict", max_age=300)
         db.commit()
         return response
     
@@ -592,13 +645,11 @@ async def login(request: Request, username: str = Form(...), password: str = For
     db.commit()
     
     session_token = create_session(db, user.id, twofa_verified=True)
-    
     log_security_event(db, user.id, "Login successful", "login_success", None, request)
     
     if is_ajax:
         return {"success": True, "redirect": "/home"}
     
-    # FIXED: samesite=strict for better CSRF protection
     response = RedirectResponse(url="/home", status_code=303)
     response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="strict", max_age=604800)
     return response
@@ -613,7 +664,8 @@ async def verify_2fa_page(request: Request, session_token: str = Cookie(None), d
     return templates.TemplateResponse("2fa_verify.html", {"request": request})
 
 @app.post("/2fa-verify")
-@limiter.limit("5/minute")  # FIXED: Enabled rate limiting
+@limiter.limit("5/minute")
+@limiter.limit("10/hour")
 async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session = Depends(get_db), session_token: str = Cookie(None)):
     db_session = db.query(DBSession).filter(DBSession.session_token == session_token).first()
     if not db_session:
@@ -643,7 +695,7 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
         log_security_event(db, user.id, "2FA verified", "twofa_success", None, request)
         response = RedirectResponse(url="/home", status_code=303)
         new_session_token = create_session(db, user.id, twofa_verified=True)
-        response.set_cookie(key="session_token", value=new_session_token, httponly=True, secure=True, samesite="strict", max_age=604800)  # FIXED: samesite=strict
+        response.set_cookie(key="session_token", value=new_session_token, httponly=True, secure=True, samesite="strict", max_age=604800)
         return response
     
     if verify_recovery_code(db, user.id, code):
@@ -658,7 +710,7 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
         log_security_event(db, user.id, "2FA verified with recovery code", "twofa_recovery", None, request)
         response = RedirectResponse(url="/home", status_code=303)
         new_session_token = create_session(db, user.id, twofa_verified=True)
-        response.set_cookie(key="session_token", value=new_session_token, httponly=True, secure=True, samesite="strict", max_age=604800)  # FIXED: samesite=strict
+        response.set_cookie(key="session_token", value=new_session_token, httponly=True, secure=True, samesite="strict", max_age=604800)
         return response
     
     if not attempt:
@@ -672,7 +724,6 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
     db.commit()
     
     log_security_event(db, user.id, "Failed 2FA attempt", "twofa_failed", f"Attempt {attempt.twofa_failures}/5", request)
-    
     return templates.TemplateResponse("2fa_verify.html", {"request": request, "error": "Invalid verification code"})
 
 @app.get("/profile", response_class=HTMLResponse)
@@ -699,6 +750,7 @@ async def enable_2fa_page(request: Request, user = Depends(get_user_from_session
     return templates.TemplateResponse("enable_2fa.html", {"request": request, "user": user, "qr_code": qr_base64, "recovery_codes": recovery_codes, "totp_secret": user.totp_secret})
 
 @app.post("/profile/enable-2fa")
+@limiter.limit("5/minute")
 async def enable_2fa_submit(request: Request, code: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
@@ -715,6 +767,7 @@ async def enable_2fa_submit(request: Request, code: str = Form(...), user = Depe
         return templates.TemplateResponse("enable_2fa.html", {"request": request, "user": user, "error": "Invalid verification code. Please try again."})
 
 @app.post("/profile/disable-2fa")
+@limiter.limit("5/minute")
 async def disable_2fa(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
@@ -732,10 +785,11 @@ async def change_password_page(request: Request, user = Depends(get_user_from_se
     return templates.TemplateResponse("change_password.html", {"request": request, "user": user})
 
 @app.post("/profile/change-password")
+@limiter.limit("5/minute")
 async def change_password_submit(request: Request, current_password: str = Form(...), new_password: str = Form(...), confirm_password: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db), session_token: str = Cookie(None)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    valid, error = validate_password(new_password)
+    valid, error = validate_password(new_password, user.username)
     if not valid:
         return templates.TemplateResponse("change_password.html", {"request": request, "user": user, "error": error})
     if new_password != confirm_password:
@@ -753,7 +807,6 @@ async def change_password_submit(request: Request, current_password: str = Form(
     db.commit()
     
     log_security_event(db, user.id, "Password changed", "password_changed", "All other sessions terminated", request)
-    
     return templates.TemplateResponse("change_password.html", {"request": request, "user": user, "success": "Password changed successfully"})
 
 @app.get("/profile/change-pin", response_class=HTMLResponse)
@@ -763,6 +816,7 @@ async def change_pin_page(request: Request, user = Depends(get_user_from_session
     return templates.TemplateResponse("change_pin.html", {"request": request, "user": user})
 
 @app.post("/profile/change-pin")
+@limiter.limit("5/minute")
 async def change_pin_submit(request: Request, current_pin: str = Form(...), new_pin: str = Form(...), confirm_pin: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
@@ -786,6 +840,7 @@ async def delete_account_page(request: Request, user = Depends(get_user_from_ses
     return templates.TemplateResponse("delete_account.html", {"request": request, "user": user})
 
 @app.post("/profile/delete-account")
+@limiter.limit("3/hour")
 async def delete_account_submit(request: Request, password: str = Form(...), confirm: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
@@ -809,6 +864,7 @@ async def delete_account_submit(request: Request, password: str = Form(...), con
     return response
 
 @app.post("/profile/read-receipts")
+@limiter.limit("10/minute")
 async def update_read_receipts(
     request: Request,
     enabled: bool = Form(...),
@@ -817,15 +873,11 @@ async def update_read_receipts(
 ):
     if not user:
         return {"success": False, "error": "Not authenticated"}
-    
     if not enabled and user.role not in ["premium", "owner"]:
         return {"success": False, "error": "Read receipts can only be disabled by Premium users"}
-    
     user.read_receipts_enabled = enabled
     db.commit()
-    
     log_security_event(db, user.id, f"Read receipts {'disabled' if not enabled else 'enabled'}", "read_receipts", None, request)
-    
     return {"success": True, "message": f"Read receipts {'enabled' if enabled else 'disabled'}"}
 
 @app.get("/send", response_class=HTMLResponse)
@@ -835,7 +887,7 @@ async def send_page(request: Request, user = Depends(get_user_from_session)):
     return templates.TemplateResponse("send.html", {"request": request, "user": user})
 
 @app.post("/send/submit")
-@limiter.limit("20/hour")  # FIXED: Enabled rate limiting
+@limiter.limit("20/hour")
 async def submit_file(request: Request, recipient: str = Form(...), filename: str = Form(...), file_size: str = Form(...), options: str = Form(...), encrypted_file: UploadFile = FastAPIFile(...), encryption_key: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return {"success": False, "error": "Not authenticated"}
@@ -856,7 +908,6 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
     if actual_size > limits["max_file_size"]:
         return {"success": False, "error": f"File too large. Max {limits['max_file_size']/1073741824}GB"}
     
-    # FIXED: Enhanced file type validation
     valid, error = validate_file_type(filename, encrypted_file.content_type)
     if not valid:
         return {"success": False, "error": error}
@@ -864,13 +915,10 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
     recipient_user = db.query(User).filter(func.lower(User.username) == recipient.lower()).first()
     if not recipient_user:
         return {"success": False, "error": "Recipient not found"}
-    
     if recipient_user.id == user.id:
         return {"success": False, "error": "You cannot send files to yourself"}
-    
     if is_user_blocked(db, user.id, recipient_user.id):
         return {"success": False, "error": "You are blocked by this user"}
-    
     if is_user_blocked(db, recipient_user.id, user.id):
         return {"success": False, "error": "You have blocked this user"}
     
@@ -915,7 +963,6 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
     db.commit()
     
     log_security_event(db, user.id, f"File uploaded: {filename}", "file_upload", f"Sent to {recipient_user.username}, size: {actual_size} bytes", request)
-    
     return {"success": True, "file_id": new_file.id}
 
 @app.get("/files/accept/{file_id}")
@@ -947,7 +994,6 @@ async def accept_file(request: Request, file_id: int, user = Depends(get_user_fr
     db.commit()
     
     log_security_event(db, user.id, f"File accepted: {file.filename}", "file_accept", f"From user {file.sender.username}", request)
-    
     return {"success": True, "file_id": file.id, "filename": file.filename}
 
 @app.get("/files/decline/{file_id}")
@@ -962,9 +1008,7 @@ async def decline_file(request: Request, file_id: int, user = Depends(get_user_f
         os.remove(file_path)
     file.status = "declined"
     db.commit()
-    
     log_security_event(db, user.id, f"File declined: {file.filename}", "file_decline", f"From user {file.sender.username}", request)
-    
     return RedirectResponse(url="/foryou", status_code=303)
 
 @app.get("/files/cancel/{file_id}")
@@ -979,9 +1023,7 @@ async def cancel_file(request: Request, file_id: int, user = Depends(get_user_fr
         os.remove(file_path)
     file.status = "cancelled"
     db.commit()
-    
     log_security_event(db, user.id, f"File cancelled: {file.filename}", "file_cancel", f"To user {file.recipient.username}", request)
-    
     return RedirectResponse(url="/history", status_code=303)
 
 @app.get("/files/download/{file_id}")
@@ -995,11 +1037,26 @@ async def download_file(
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     
+    if file_id <= 0:
+        return RedirectResponse(url="/history", status_code=303)
+    
     file = db.query(File).filter(File.id == file_id, File.recipient_id == user.id, File.status == "accepted").first()
     if not file:
         return RedirectResponse(url="/history", status_code=303)
     
-    file_path = os.path.join(UPLOAD_DIR, file.encrypted_filename)
+    if not file.encrypted_filename or '..' in file.encrypted_filename or '/' in file.encrypted_filename or '\\' in file.encrypted_filename:
+        file.status = "expired"
+        db.commit()
+        return RedirectResponse(url="/history", status_code=303)
+    
+    file_path = os.path.abspath(os.path.join(UPLOAD_DIR, file.encrypted_filename))
+    upload_dir_abs = os.path.abspath(UPLOAD_DIR)
+    
+    if not file_path.startswith(upload_dir_abs):
+        file.status = "expired"
+        db.commit()
+        return RedirectResponse(url="/history", status_code=303)
+    
     if not os.path.exists(file_path):
         file.status = "expired"
         db.commit()
@@ -1050,7 +1107,7 @@ async def download_file(
     return FileResponse(file_path, media_type="application/octet-stream", filename=file.filename, headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'})
 
 @app.get("/search")
-@limiter.limit("10/minute")  # FIXED: Enabled rate limiting
+@limiter.limit("10/minute")
 async def search_users(request: Request, q: str, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return {"users": []}
@@ -1117,7 +1174,9 @@ async def get_user_profile(username: str, session_token: str = Cookie(None), db:
     }
 
 @app.post("/api/user/bio")
+@limiter.limit("10/minute")
 async def update_bio(
+    request: Request,
     bio: str = Form(""),
     session_token: str = Cookie(None),
     db: Session = Depends(get_db)
@@ -1125,16 +1184,12 @@ async def update_bio(
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
-    
     if user.role not in ['pro', 'premium', 'owner']:
         return {"success": False, "error": "Bio requires Pro or Premium subscription"}
-    
     if len(bio) > 200:
         return {"success": False, "error": "Bio must be 200 characters or less"}
-    
     user.bio = escape_html(bio) if bio else None
     db.commit()
-    
     return {"success": True, "message": "Bio updated"}
 
 @app.get("/api/sessions")
@@ -1142,13 +1197,11 @@ async def get_sessions(session_token: str = Cookie(None), db: Session = Depends(
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
-    
     cutoff_date = datetime.utcnow() - timedelta(days=30)
     sessions = db.query(LoginHistory).filter(
         LoginHistory.user_id == user.id,
         LoginHistory.login_time >= cutoff_date
     ).order_by(LoginHistory.login_time.desc()).all()
-    
     return {
         "success": True,
         "sessions": [{"login_time": s.login_time.isoformat()} for s in sessions]
@@ -1159,13 +1212,11 @@ async def get_security_logs(session_token: str = Cookie(None), db: Session = Dep
     user = get_current_user(db, session_token)
     if not user:
         return {"success": False, "error": "Not authenticated"}
-    
     cutoff_date = datetime.utcnow() - timedelta(days=30)
     logs = db.query(SecurityLog).filter(
         SecurityLog.user_id == user.id,
         SecurityLog.created_at >= cutoff_date
     ).order_by(SecurityLog.created_at.desc()).limit(50).all()
-    
     return {
         "success": True,
         "logs": [
@@ -1182,9 +1233,7 @@ async def get_security_logs(session_token: str = Cookie(None), db: Session = Dep
 async def admin_panel(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
         return RedirectResponse(url="/home", status_code=303)
-    
     csrf_token = generate_csrf_token(user.id, db)
-    
     return templates.TemplateResponse("admin_simple.html", {
         "request": request,
         "user": user,
@@ -1196,13 +1245,11 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
 async def admin_stats(user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
     total_users = db.query(User).count()
     active_users = db.query(User).filter(User.last_login > datetime.utcnow() - timedelta(days=7)).count()
     total_files = db.query(File).count()
     total_storage = db.query(func.sum(File.file_size)).scalar() or 0
     total_storage_gb = round(total_storage / (1024 * 1024 * 1024), 1)
-    
     return {
         "success": True,
         "total_users": total_users,
@@ -1219,7 +1266,6 @@ async def admin_stats(user = Depends(get_user_from_session), db: Session = Depen
 async def admin_search_users(q: str = "", role: str = "all", status: str = "all", user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
     query = db.query(User)
     if q:
         query = query.filter(func.lower(User.username).contains(q.lower()))
@@ -1229,16 +1275,13 @@ async def admin_search_users(q: str = "", role: str = "all", status: str = "all"
         query = query.filter(User.is_banned == True)
     elif status == "active":
         query = query.filter(User.is_banned == False)
-    
     users = query.order_by(desc(User.created_at)).limit(50).all()
-    
     result = []
     for u in users:
         days_left = None
         if u.subscription_expires_at and u.role in ["pro", "premium"]:
             days = (u.subscription_expires_at - datetime.utcnow()).days
             days_left = days if days > 0 else 0
-        
         result.append({
             "id": u.id,
             "username": u.username,
@@ -1252,7 +1295,6 @@ async def admin_search_users(q: str = "", role: str = "all", status: str = "all"
             "days_left": days_left,
             "subscription_expires_at": u.subscription_expires_at.isoformat() if u.subscription_expires_at else None
         })
-    
     return {"success": True, "users": result}
 
 @app.post("/admin/user/ban/{user_id}")
@@ -1266,26 +1308,20 @@ async def admin_ban_user(
 ):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
     if not validate_csrf_token(csrf_token, user.id, db):
         return {"success": False, "error": "Invalid CSRF token"}
-    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
-    
     sessions = db.query(DBSession).filter(DBSession.user_id == target.id).all()
     session_count = len(sessions)
     for s in sessions:
         db.delete(s)
-    
     target.is_banned = True
     target.ban_reason = reason
     db.commit()
-    
     log_security_event(db, user.id, f"User banned: {target.username}", "admin_ban", f"Reason: {reason}, {session_count} sessions terminated", request)
     log_security_event(db, target.id, f"Account banned by admin", "account_banned", f"Reason: {reason}", request)
-    
     return {"success": True, "message": f"User {target.username} banned, {session_count} sessions terminated"}
 
 @app.post("/admin/user/unban/{user_id}")
@@ -1298,21 +1334,16 @@ async def admin_unban_user(
 ):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
     if not validate_csrf_token(csrf_token, user.id, db):
         return {"success": False, "error": "Invalid CSRF token"}
-    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
-    
     target.is_banned = False
     target.ban_reason = None
     db.commit()
-    
     log_security_event(db, user.id, f"User unbanned: {target.username}", "admin_unban", None, request)
     log_security_event(db, target.id, f"Account unbanned by admin", "account_unbanned", None, request)
-    
     return {"success": True, "message": f"User {target.username} unbanned"}
 
 @app.post("/admin/user/role/{user_id}")
@@ -1326,30 +1357,22 @@ async def admin_change_role(
 ):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
     if not validate_csrf_token(csrf_token, user.id, db):
         return {"success": False, "error": "Invalid CSRF token"}
-    
     if role not in ["user", "pro", "premium"]:
         return {"success": False, "error": "Invalid role"}
-    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
-    
     old_role = target.role
     target.role = role
-    
     if role in ["pro", "premium"]:
         target.subscription_expires_at = datetime.utcnow() + timedelta(days=30)
     else:
         target.subscription_expires_at = None
-    
     db.commit()
-    
     log_security_event(db, user.id, f"User role changed: {target.username}", "admin_role_change", f"From {old_role} to {role}", request)
     log_security_event(db, target.id, f"Account role changed to {role}", "role_changed", f"Expires in 30 days", request)
-    
     return {"success": True, "message": f"User {target.username} role changed to {role} (expires in 30 days)"}
 
 @app.post("/admin/user/delete/{user_id}")
@@ -1362,57 +1385,45 @@ async def admin_delete_user(
 ):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
     if not validate_csrf_token(csrf_token, user.id, db):
         return {"success": False, "error": "Invalid CSRF token"}
-    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
-    
     files = db.query(File).filter((File.sender_id == target.id) | (File.recipient_id == target.id)).all()
     for f in files:
         file_path = os.path.join(UPLOAD_DIR, f.encrypted_filename)
         if os.path.exists(file_path):
             os.remove(file_path)
-    
     log_security_event(db, user.id, f"User deleted: {target.username}", "admin_delete", f"All associated data removed", request)
-    
     db.delete(target)
     db.commit()
-    
     return {"success": True, "message": f"User {target.username} and all associated data deleted", "redirect": "/home"}
 
 @app.get("/admin/user/{user_id}")
 async def admin_user_details(user_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
-    
     files_sent = db.query(File).filter(File.sender_id == target.id).all()
     files_received = db.query(File).filter(File.recipient_id == target.id).all()
-    
     files_sent_count = len(files_sent)
     files_received_count = len(files_received)
     storage_sent = sum(f.file_size for f in files_sent)
     storage_received = sum(f.file_size for f in files_received)
-    
     files_by_status = {
         "pending": len([f for f in files_sent if f.status == "pending"]),
         "accepted": len([f for f in files_sent if f.status == "accepted"]),
         "declined": len([f for f in files_sent if f.status == "declined"]),
         "downloaded": len([f for f in files_sent if f.status == "downloaded"])
     }
-    
     active_chats = db.query(ChatConversation).filter(
         ((ChatConversation.user1_id == target.id) | (ChatConversation.user2_id == target.id)),
         ChatConversation.status == "active"
     ).count()
     messages_sent = db.query(ChatMessage).filter(ChatMessage.sender_id == target.id).count()
-    
     return {
         "success": True,
         "user": {
@@ -1444,20 +1455,15 @@ async def chart_user_growth(days: int = 30, session_token: str = Cookie(None), d
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
-    # FIXED: Validate days parameter
     days = validate_days_param(days, 365)
-    
     labels = []
     values = []
-    
     for i in range(days):
         day_start = datetime.utcnow() - timedelta(days=days-i-1)
         day_end = day_start + timedelta(days=1)
         count = db.query(User).filter(User.created_at >= day_start, User.created_at < day_end).count()
         labels.append(day_start.strftime("%m/%d"))
         values.append(count)
-    
     return {"success": True, "labels": labels, "values": values}
 
 @app.get("/admin/chart/file-activity")
@@ -1465,25 +1471,18 @@ async def chart_file_activity(days: int = 30, type: str = "uploads", session_tok
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
-    # FIXED: Validate days parameter
     days = validate_days_param(days, 365)
-    
     labels = []
     values = []
-    
     for i in range(days):
         day_start = datetime.utcnow() - timedelta(days=days-i-1)
         day_end = day_start + timedelta(days=1)
-        
         if type == "uploads":
             count = db.query(File).filter(File.created_at >= day_start, File.created_at < day_end).count()
         else:
             count = db.query(File).filter(File.downloaded_at >= day_start, File.downloaded_at < day_end).count()
-        
         labels.append(day_start.strftime("%m/%d"))
         values.append(count)
-    
     return {"success": True, "labels": labels, "values": values}
 
 @app.get("/admin/chart/storage-by-role")
@@ -1491,15 +1490,12 @@ async def chart_storage_by_role(session_token: str = Cookie(None), db: Session =
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
     free_result = db.query(func.sum(File.file_size)).join(User, File.sender_id == User.id).filter(User.role == "user", User.is_banned == False).scalar()
     pro_result = db.query(func.sum(File.file_size)).join(User, File.sender_id == User.id).filter(User.role == "pro", User.is_banned == False).scalar()
     premium_result = db.query(func.sum(File.file_size)).join(User, File.sender_id == User.id).filter(User.role == "premium", User.is_banned == False).scalar()
-    
     free_storage = float(free_result) if free_result else 0
     pro_storage = float(pro_result) if pro_result else 0
     premium_storage = float(premium_result) if premium_result else 0
-    
     return {
         "success": True,
         "free": round(free_storage / (1024 * 1024 * 1024), 1),
@@ -1512,25 +1508,19 @@ async def chart_storage_trend(days: int = 30, session_token: str = Cookie(None),
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
-    # FIXED: Validate days parameter
     days = validate_days_param(days, 365)
-    
     labels = []
     values = []
-    
     for i in range(days):
         day_end = datetime.utcnow() - timedelta(days=days-i-1)
         storage_result = db.query(func.sum(File.file_size)).filter(File.created_at <= day_end).scalar()
         storage = float(storage_result) if storage_result else 0
         labels.append(day_end.strftime("%m/%d"))
         values.append(round(storage / (1024 * 1024 * 1024), 1))
-    
     start_value = values[0] if values else 0
     end_value = values[-1] if values else 0
     growth = end_value - start_value
     growth_percent = round((growth / start_value * 100), 1) if start_value > 0 else 0
-    
     return {
         "success": True,
         "labels": labels,
@@ -1546,27 +1536,19 @@ async def chart_activity_heatmap(days: int = 30, session_token: str = Cookie(Non
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
-    
-    # FIXED: Validate days parameter
     days = validate_days_param(days, 90)
-    
     activities = []
-    
     for i in range(days):
         day_start = datetime.utcnow() - timedelta(days=days-i-1)
         day_end = day_start + timedelta(days=1)
-        
         login_count = db.query(LoginHistory).filter(LoginHistory.login_time >= day_start, LoginHistory.login_time < day_end).count()
         upload_count = db.query(File).filter(File.created_at >= day_start, File.created_at < day_end).count()
         download_count = db.query(File).filter(File.downloaded_at >= day_start, File.downloaded_at < day_end).count()
-        
         total = login_count + upload_count + download_count
-        
         activities.append({
             "date": day_start.strftime("%Y-%m-%d"),
             "count": total
         })
-    
     return {"success": True, "activities": activities}
 
 @app.get("/files/raw/{file_id}")
@@ -1577,15 +1559,12 @@ async def download_raw_file(
 ):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    
     file = db.query(File).filter(File.id == file_id, File.recipient_id == user.id, File.status == "accepted").first()
     if not file:
         return RedirectResponse(url="/history", status_code=303)
-    
     file_path = os.path.join(UPLOAD_DIR, file.encrypted_filename)
     if not os.path.exists(file_path):
         return RedirectResponse(url="/history", status_code=303)
-    
     return FileResponse(file_path, media_type="application/octet-stream", filename=f"{file.filename}.encrypted")
 
 @app.exception_handler(404)

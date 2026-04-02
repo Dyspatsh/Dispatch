@@ -1,8 +1,10 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, Float, BigInteger, Index
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Text, ForeignKey, BigInteger, Enum, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime, timedelta
 import os
+import hashlib
+import secrets
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,18 +15,27 @@ if not DATABASE_URL:
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 Base = declarative_base()
+
+# IP hashing function for privacy
+IP_SALT = os.getenv("IP_SALT", secrets.token_hex(32))
+
+def hash_ip_address(ip_address: str) -> str:
+    """Hash IP address for privacy while preserving rate limiting capability"""
+    if not ip_address:
+        return None
+    # Use SHA-256 with salt - cannot be reversed
+    return hashlib.sha256(f"{IP_SALT}{ip_address}".encode()).hexdigest()
 
 class User(Base):
     __tablename__ = "users"
     
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(16), unique=True, index=True, nullable=False)
-    password_hash = Column(String(128), nullable=False)
-    pin_hash = Column(String(128), nullable=False)
-    recovery_phrase_hash = Column(String(128), nullable=False)
-    role = Column(String(20), default="user")
+    password_hash = Column(String(255), nullable=False)
+    pin_hash = Column(String(255), nullable=False)
+    recovery_phrase_hash = Column(String(255), nullable=False)
+    role = Column(String(20), default="user")  # user, pro, premium, owner
     is_banned = Column(Boolean, default=False)
     ban_reason = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -32,27 +43,26 @@ class User(Base):
     totp_secret = Column(String(32), nullable=True)
     totp_enabled = Column(Boolean, default=False)
     recovery_codes_hash = Column(Text, nullable=True)
-    bio = Column(String(200), nullable=True)
     subscription_expires_at = Column(DateTime, nullable=True)
+    bio = Column(Text, nullable=True)
     read_receipts_enabled = Column(Boolean, default=True)
     
-    sent_files = relationship("File", foreign_keys="File.sender_id", back_populates="sender")
-    received_files = relationship("File", foreign_keys="File.recipient_id", back_populates="recipient")
+    # Relationships
+    files_sent = relationship("File", foreign_keys="File.sender_id", back_populates="sender")
+    files_received = relationship("File", foreign_keys="File.recipient_id", back_populates="recipient")
     sessions = relationship("Session", back_populates="user")
     login_history = relationship("LoginHistory", back_populates="user")
     security_logs = relationship("SecurityLog", back_populates="user")
-    blocked_users = relationship("BlockedUser", foreign_keys="BlockedUser.user_id", back_populates="blocker")
-    blocked_by = relationship("BlockedUser", foreign_keys="BlockedUser.blocked_user_id", back_populates="blocked")
-    sent_invitations = relationship("ChatConversation", foreign_keys="ChatConversation.initiator_id")
-    chat_conversations1 = relationship("ChatConversation", foreign_keys="ChatConversation.user1_id", back_populates="user1")
-    chat_conversations2 = relationship("ChatConversation", foreign_keys="ChatConversation.user2_id", back_populates="user2")
-    chat_messages = relationship("ChatMessage", foreign_keys="ChatMessage.sender_id", back_populates="sender")
+    blocked_users = relationship("BlockedUser", foreign_keys="BlockedUser.user_id", back_populates="user")
+    blocked_by = relationship("BlockedUser", foreign_keys="BlockedUser.blocked_user_id")
+    chat_messages = relationship("ChatMessage", back_populates="sender")
+    group_messages = relationship("GroupChatMessage", back_populates="sender")
     group_memberships = relationship("GroupMember", back_populates="user")
-    group_invitations_sent = relationship("GroupInvitation", foreign_keys="GroupInvitation.inviter_id", back_populates="inviter")
-    group_invitations_received = relationship("GroupInvitation", foreign_keys="GroupInvitation.invited_user_id", back_populates="invited_user")
-    group_messages = relationship("GroupChatMessage", foreign_keys="GroupChatMessage.sender_id", back_populates="sender")
+    groups_created = relationship("ChatGroup", back_populates="created_by")
+    group_invites_sent = relationship("GroupInvitation", foreign_keys="GroupInvitation.inviter_id", back_populates="inviter")
+    group_invites_received = relationship("GroupInvitation", foreign_keys="GroupInvitation.invited_user_id", back_populates="invited_user")
     message_reactions = relationship("MessageReaction", back_populates="user")
-    message_read_receipts = relationship("MessageReadReceipt", back_populates="user")
+    message_reads = relationship("MessageReadReceipt", back_populates="user")
 
 class Session(Base):
     __tablename__ = "sessions"
@@ -66,58 +76,6 @@ class Session(Base):
     
     user = relationship("User", back_populates="sessions")
 
-class LoginHistory(Base):
-    __tablename__ = "login_history"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    login_time = Column(DateTime, default=datetime.utcnow)
-    
-    user = relationship("User", back_populates="login_history")
-
-class SecurityLog(Base):
-    __tablename__ = "security_logs"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    action = Column(String(50), nullable=False)
-    action_type = Column(String(20), nullable=False)
-    details = Column(Text, nullable=True)
-    ip_address = Column(String(45), nullable=True)
-    user_agent = Column(String(255), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    user = relationship("User", back_populates="security_logs")
-    
-    __table_args__ = (
-        Index('idx_security_logs_user_created', 'user_id', 'created_at'),
-    )
-
-class CSRFToken(Base):
-    __tablename__ = "csrf_tokens"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    token = Column(String(64), unique=True, index=True, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    user = relationship("User")
-
-class FailedLoginAttempt(Base):
-    __tablename__ = "failed_login_attempts"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(16), nullable=False)
-    attempt_count = Column(Integer, default=1)
-    twofa_failures = Column(Integer, default=0)
-    lock_until = Column(DateTime, nullable=True)
-    last_attempt = Column(DateTime, default=datetime.utcnow)
-    
-    __table_args__ = (
-        Index('idx_failed_login_username', 'username'),
-    )
-
 class File(Base):
     __tablename__ = "files"
     
@@ -126,17 +84,29 @@ class File(Base):
     recipient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     filename = Column(String(255), nullable=False)
     encrypted_filename = Column(String(255), nullable=False)
-    encrypted_file_key = Column(Text, nullable=True)
+    encrypted_file_key = Column(Text, nullable=False)
     file_size = Column(BigInteger, nullable=False)
-    status = Column(String(20), default="pending")
+    status = Column(String(20), default="pending")  # pending, accepted, declined, downloaded, expired, cancelled
     options = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
     accepted_at = Column(DateTime, nullable=True)
     downloaded_at = Column(DateTime, nullable=True)
     
-    sender = relationship("User", foreign_keys=[sender_id], back_populates="sent_files")
-    recipient = relationship("User", foreign_keys=[recipient_id], back_populates="received_files")
+    sender = relationship("User", foreign_keys=[sender_id], back_populates="files_sent")
+    recipient = relationship("User", foreign_keys=[recipient_id], back_populates="files_received")
+
+class Payment(Base):
+    __tablename__ = "payments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    amount = Column(Integer, nullable=False)
+    currency = Column(String(10), default="XMR")
+    status = Column(String(20), default="pending")
+    tx_id = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    confirmed_at = Column(DateTime, nullable=True)
 
 class ChatConversation(Base):
     __tablename__ = "chat_conversations"
@@ -144,14 +114,14 @@ class ChatConversation(Base):
     id = Column(Integer, primary_key=True, index=True)
     user1_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     user2_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    status = Column(String(20), default="pending")
+    status = Column(String(20), default="pending")  # pending, active, blocked
     initiator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    user1 = relationship("User", foreign_keys=[user1_id], back_populates="chat_conversations1")
-    user2 = relationship("User", foreign_keys=[user2_id], back_populates="chat_conversations2")
-    initiator = relationship("User", foreign_keys=[initiator_id], overlaps="sent_invitations")
+    user1 = relationship("User", foreign_keys=[user1_id])
+    user2 = relationship("User", foreign_keys=[user2_id])
+    initiator = relationship("User", foreign_keys=[initiator_id])
     messages = relationship("ChatMessage", back_populates="conversation")
 
 class ChatMessage(Base):
@@ -163,11 +133,11 @@ class ChatMessage(Base):
     encrypted_content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     expires_at = Column(DateTime, nullable=False)
-    delivered_at = Column(DateTime, nullable=True)
     read_at = Column(DateTime, nullable=True)
+    delivered_at = Column(DateTime, nullable=True)
     
     conversation = relationship("ChatConversation", back_populates="messages")
-    sender = relationship("User", back_populates="chat_messages")
+    sender = relationship("User", foreign_keys=[sender_id], back_populates="chat_messages")
 
 class BlockedUser(Base):
     __tablename__ = "blocked_users"
@@ -177,8 +147,57 @@ class BlockedUser(Base):
     blocked_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    blocker = relationship("User", foreign_keys=[user_id], back_populates="blocked_users")
-    blocked = relationship("User", foreign_keys=[blocked_user_id], back_populates="blocked_by")
+    user = relationship("User", foreign_keys=[user_id], back_populates="blocked_users")
+    blocked_user = relationship("User", foreign_keys=[blocked_user_id])
+
+class LoginHistory(Base):
+    __tablename__ = "login_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    login_time = Column(DateTime, default=datetime.utcnow)
+    ip_hash = Column(String(64), nullable=True)  # HASHED IP - not plaintext!
+    
+    user = relationship("User", back_populates="login_history")
+
+class SecurityLog(Base):
+    __tablename__ = "security_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    action = Column(String(255), nullable=False)
+    action_type = Column(String(50), nullable=False)
+    details = Column(Text, nullable=True)
+    ip_hash = Column(String(64), nullable=True)  # HASHED IP - not plaintext!
+    user_agent = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    user = relationship("User", back_populates="security_logs")
+
+class FailedLoginAttempt(Base):
+    __tablename__ = "failed_login_attempts"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(16), nullable=False, index=True)
+    attempt_count = Column(Integer, default=0)
+    twofa_failures = Column(Integer, default=0)
+    last_attempt = Column(DateTime, default=datetime.utcnow)
+    lock_until = Column(DateTime, nullable=True)
+    ip_hash = Column(String(64), nullable=True)  # HASHED IP - not plaintext!
+    
+    # Composite index for faster lookups
+    __table_args__ = (
+        Index('ix_failed_attempts_username_ip', 'username', 'ip_hash'),
+    )
+
+class CSRFToken(Base):
+    __tablename__ = "csrf_tokens"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String(64), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 class ChatGroup(Base):
     __tablename__ = "chat_groups"
@@ -189,7 +208,7 @@ class ChatGroup(Base):
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     
-    created_by = relationship("User", foreign_keys=[created_by_id])
+    created_by = relationship("User", foreign_keys=[created_by_id], back_populates="groups_created")
     members = relationship("GroupMember", back_populates="group")
     messages = relationship("GroupChatMessage", back_populates="group")
     invitations = relationship("GroupInvitation", back_populates="group")
@@ -200,7 +219,7 @@ class GroupMember(Base):
     id = Column(Integer, primary_key=True, index=True)
     group_id = Column(Integer, ForeignKey("chat_groups.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    role = Column(String(20), default="member")
+    role = Column(String(20), default="member")  # owner, admin, member
     joined_at = Column(DateTime, default=datetime.utcnow)
     
     group = relationship("ChatGroup", back_populates="members")
@@ -218,7 +237,7 @@ class GroupChatMessage(Base):
     delivered_at = Column(DateTime, nullable=True)
     
     group = relationship("ChatGroup", back_populates="messages")
-    sender = relationship("User", back_populates="group_messages")
+    sender = relationship("User", foreign_keys=[sender_id], back_populates="group_messages")
     reactions = relationship("MessageReaction", back_populates="message")
     read_receipts = relationship("MessageReadReceipt", back_populates="message")
 
@@ -228,7 +247,7 @@ class MessageReaction(Base):
     id = Column(Integer, primary_key=True, index=True)
     message_id = Column(Integer, ForeignKey("group_chat_messages.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    reaction_type = Column(String(20), nullable=False)
+    reaction_type = Column(String(20), nullable=False)  # like, thanks, agree, helpful
     created_at = Column(DateTime, default=datetime.utcnow)
     
     message = relationship("GroupChatMessage", back_populates="reactions")
@@ -243,7 +262,7 @@ class MessageReadReceipt(Base):
     read_at = Column(DateTime, default=datetime.utcnow)
     
     message = relationship("GroupChatMessage", back_populates="read_receipts")
-    user = relationship("User", back_populates="message_read_receipts")
+    user = relationship("User", back_populates="message_reads")
 
 class GroupInvitation(Base):
     __tablename__ = "group_invitations"
@@ -252,29 +271,12 @@ class GroupInvitation(Base):
     group_id = Column(Integer, ForeignKey("chat_groups.id"), nullable=False)
     inviter_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     invited_user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    status = Column(String(20), default="pending")
+    status = Column(String(20), default="pending")  # pending, accepted, declined
     created_at = Column(DateTime, default=datetime.utcnow)
     
     group = relationship("ChatGroup", back_populates="invitations")
-    inviter = relationship("User", foreign_keys=[inviter_id], back_populates="group_invitations_sent")
-    invited_user = relationship("User", foreign_keys=[invited_user_id], back_populates="group_invitations_received")
-
-class Payment(Base):
-    __tablename__ = "payments"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    amount = Column(Float, nullable=False)
-    currency = Column(String(10), default="XMR")
-    transaction_id = Column(String(255), unique=True, nullable=True)
-    status = Column(String(20), default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    confirmed_at = Column(DateTime, nullable=True)
-    
-    user = relationship("User")
-
-def init_db():
-    Base.metadata.create_all(bind=engine)
+    inviter = relationship("User", foreign_keys=[inviter_id], back_populates="group_invites_sent")
+    invited_user = relationship("User", foreign_keys=[invited_user_id], back_populates="group_invites_received")
 
 def get_db():
     db = SessionLocal()
@@ -282,3 +284,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Create all tables
+def init_db():
+    Base.metadata.create_all(bind=engine)

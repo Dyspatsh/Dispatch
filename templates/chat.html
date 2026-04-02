@@ -3,102 +3,112 @@
 {% block title %}Chat with {{ other_user.username }}{% endblock %}
 
 {% block content %}
-<div class="chat-layout">
-    <div class="chat-sidebar">
-        <h3>Active Chats</h3>
-        {% if active_conversations %}
-            {% for conv in active_conversations %}
-                {% set other = conv.user1 if conv.user2_id == user.id else conv.user2 %}
-                <a href="/chat/{{ other.id }}" class="chat-sidebar-item {% if other.id == other_user.id %}active{% endif %}">
-                    <div class="chat-sidebar-info">
-                        <span class="chat-sidebar-name">{{ other.username }}</span>
-                        {% if other.id in online_users %}
-                            <span class="online-dot"></span>
-                        {% endif %}
-                    </div>
-                    {% if conv.unread_count and conv.unread_count > 0 %}
-                        <span class="unread-badge">{{ conv.unread_count }}</span>
-                    {% endif %}
-                </a>
-            {% endfor %}
-        {% else %}
-        <p class="empty-message">No active chats</p>
-        {% endif %}
-    </div>
+<div id="chatContainer" 
+     data-conversation-id="{{ conversation_id }}"
+     data-current-user-id="{{ user.id }}"
+     data-other-user-id="{{ other_user.id }}"
+     data-other-username="{{ other_user.username }}"
+     data-csrf-token="{{ csrf_token }}">
     
-    <div class="chat-main">
-        <div class="chat-header">
-            <div class="chat-header-info">
-                <h2 class="clickable-username" onclick="showUserProfile('{{ other_user.username }}')">{{ other_user.username }}</h2>
-                <div class="chat-status" id="chatStatus">
-                    <span class="status-dot" id="statusDot"></span>
-                    <span class="status-text" id="statusText">Checking...</span>
-                </div>
-            </div>
-            <div class="chat-actions">
-                {% if blocked_other %}
-                    <button id="unblockBtn" class="btn btn-small btn-secondary" onclick="unblockUser()">Unblock User</button>
+    <div class="chat-layout">
+        <div class="chat-sidebar">
+            <h3>Active Chats</h3>
+            <div id="activeChatsList">
+                {% if active_conversations %}
+                    {% for conv in active_conversations %}
+                        {% set other = conv.user1 if conv.user2_id == user.id else conv.user2 %}
+                        <a href="/chat/{{ other.id }}" class="chat-sidebar-item {% if other.id == other_user.id %}active{% endif %}">
+                            <div class="chat-sidebar-info">
+                                <span class="chat-sidebar-name">{{ other.username }}</span>
+                                {% if other.id in online_users %}
+                                    <span class="online-dot"></span>
+                                {% endif %}
+                            </div>
+                            {% if conv.unread_count and conv.unread_count > 0 %}
+                                <span class="unread-badge">{{ conv.unread_count }}</span>
+                            {% endif %}
+                        </a>
+                    {% endfor %}
                 {% else %}
-                    <button id="blockBtn" class="btn btn-small btn-danger" onclick="blockUser()">Block User</button>
+                    <p class="empty-message">No active chats</p>
                 {% endif %}
             </div>
-            {% if blocked_by_other %}
-            <div class="blocked-warning">You are blocked by this user. You cannot send messages.</div>
+        </div>
+        
+        <div class="chat-main">
+            <div class="chat-header">
+                <div class="chat-header-info">
+                    <h2 id="usernameProfileBtn" class="clickable-username">{{ other_user.username }}</h2>
+                    <div class="chat-status" id="chatStatus">
+                        <span class="status-dot" id="statusDot"></span>
+                        <span class="status-text" id="statusText">Checking...</span>
+                    </div>
+                </div>
+                <div class="chat-actions">
+                    {% if blocked_other %}
+                        <button id="unblockBtn" class="btn btn-small btn-secondary">Unblock User</button>
+                    {% else %}
+                        <button id="blockBtn" class="btn btn-small btn-danger">Block User</button>
+                    {% endif %}
+                </div>
+                {% if blocked_by_other %}
+                    <div class="blocked-warning">You are blocked by this user. You cannot send messages.</div>
+                {% endif %}
+            </div>
+            
+            <div class="chat-messages" id="chatMessages">
+                {% for msg in messages %}
+                    <div class="message {% if msg.sender_id == user.id %}message-sent{% else %}message-received{% endif %}" data-message-id="{{ msg.id }}">
+                        <div class="message-content">{{ msg.encrypted_content }}</div>
+                        <div class="message-footer">
+                            <span class="message-time">{{ msg.created_at.strftime('%H:%M') }}</span>
+                            <span class="message-status" id="status-{{ msg.id }}">
+                                {% if msg.sender_id == user.id %}
+                                    {% if msg.read_at %}
+                                        Read
+                                    {% elif msg.delivered_at %}
+                                        Delivered
+                                    {% else %}
+                                        Sent
+                                    {% endif %}
+                                {% endif %}
+                            </span>
+                            <button class="reaction-trigger" data-message-id="{{ msg.id }}">[React]</button>
+                            <span class="message-expiry" data-expires="{{ msg.expires_at.isoformat() }}"></span>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            
+            {% if not blocked_by_other and not blocked_other %}
+                <div class="chat-input-area">
+                    <div class="message-tools">
+                        <span class="char-counter" id="charCounter">0 / <span id="maxChars">{{ '100' if user.role == 'pro' else '200' if user.role == 'premium' else 'Unlimited' }}</span></span>
+                    </div>
+                    <textarea id="messageInput" placeholder="Type your message..." maxlength="{% if user.role == 'pro' %}100{% elif user.role == 'premium' %}200{% else %}999999{% endif %}" rows="3"></textarea>
+                    <button id="sendBtn" class="btn btn-primary">Send</button>
+                </div>
+            {% else %}
+                <div class="chat-disabled">
+                    <p>Messaging is disabled for this conversation.</p>
+                </div>
             {% endif %}
         </div>
-        
-        <div class="chat-messages" id="chatMessages">
-            {% for msg in messages %}
-            <div class="message {% if msg.sender_id == user.id %}message-sent{% else %}message-received{% endif %}" data-message-id="{{ msg.id }}">
-                <div class="message-content">{{ msg.encrypted_content }}</div>
-                <div class="message-footer">
-                    <span class="message-time">{{ msg.created_at.strftime('%H:%M') }}</span>
-                    <span class="message-status" id="status-{{ msg.id }}">
-                        {% if msg.sender_id == user.id %}
-                            {% if msg.read_at %}
-                                Read
-                            {% elif msg.delivered_at %}
-                                Delivered
-                            {% else %}
-                                Sent
-                            {% endif %}
-                        {% endif %}
-                    </span>
-                    <button class="reaction-trigger" data-message-id="{{ msg.id }}">[React]</button>
-                    <span class="message-expiry" data-expires="{{ msg.expires_at.isoformat() }}"></span>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        
-        {% if not blocked_by_other and not blocked_other %}
-        <div class="chat-input-area">
-            <div class="message-tools">
-                <span class="char-counter" id="charCounter">0 / <span id="maxChars">{{ '100' if user.role == 'pro' else '200' if user.role == 'premium' else 'Unlimited' }}</span></span>
-            </div>
-            <textarea id="messageInput" placeholder="Type your message..." maxlength="{% if user.role == 'pro' %}100{% elif user.role == 'premium' %}200{% else %}999999{% endif %}" rows="3"></textarea>
-            <button id="sendBtn" class="btn btn-primary">Send</button>
-        </div>
-        {% else %}
-        <div class="chat-disabled">
-            <p>Messaging is disabled for this conversation.</p>
-        </div>
-        {% endif %}
     </div>
-</div>
-
-<div id="reactionModal" class="modal" style="display: none;">
-    <div class="modal-content modal-small">
-        <div class="modal-header">
-            <h3>Add Reaction</h3>
-            <button class="modal-close" onclick="closeReactionModal()">[X]</button>
-        </div>
-        <div class="modal-body">
-            <div class="reaction-options">
-                <button class="reaction-option" data-reaction="like">[Like]</button>
-                <button class="reaction-option" data-reaction="thanks">[Thanks]</button>
-                <button class="reaction-option" data-reaction="agree">[Agree]</button>
-                <button class="reaction-option" data-reaction="helpful">[Helpful]</button>
+    
+    <div id="reactionModal" class="modal" style="display: none;">
+        <div class="modal-content modal-small">
+            <div class="modal-header">
+                <h3>Add Reaction</h3>
+                <button class="modal-close" id="closeReactionModal">[X]</button>
+            </div>
+            <div class="modal-body">
+                <div class="reaction-options">
+                    <button class="reaction-option" data-reaction="like">[Like]</button>
+                    <button class="reaction-option" data-reaction="thanks">[Thanks]</button>
+                    <button class="reaction-option" data-reaction="agree">[Agree]</button>
+                    <button class="reaction-option" data-reaction="helpful">[Helpful]</button>
+                </div>
             </div>
         </div>
     </div>
@@ -415,332 +425,42 @@
 }
 </style>
 
+<script src="/static/chat.js"></script>
 <script>
-const conversationId = {{ conversation_id }};
-const currentUserId = {{ user.id }};
-const otherUserId = {{ other_user.id }};
-const otherUsername = "{{ other_user.username }}";
-const chatMessages = document.getElementById('chatMessages');
-const messageInput = document.getElementById('messageInput');
-const sendBtn = document.getElementById('sendBtn');
-const charCounterSpan = document.getElementById('charCounter');
-const statusDot = document.getElementById('statusDot');
-const statusText = document.getElementById('statusText');
-
-let ws = null;
-let reconnectAttempts = 0;
-let maxReconnectAttempts = 5;
-let userScrolledUp = false;
-let lastScrollTop = 0;
-let typingTimeout = null;
-let currentMessageIdForReaction = null;
-
-const maxChars = {% if user.role == 'pro' %}100{% elif user.role == 'premium' %}200{% else %}999999{% endif %};
-
-function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function isScrolledToBottom() {
-    const threshold = 100;
-    const position = chatMessages.scrollTop + chatMessages.clientHeight;
-    const height = chatMessages.scrollHeight;
-    return position >= height - threshold;
-}
-
-function scrollToBottomIfNeeded() {
-    if (!userScrolledUp) {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-}
-
-chatMessages.addEventListener('scroll', function() {
-    const isAtBottom = isScrolledToBottom();
-    if (isAtBottom) {
-        userScrolledUp = false;
-    } else {
-        if (chatMessages.scrollTop < lastScrollTop) {
-            userScrolledUp = true;
-        }
-    }
-    lastScrollTop = chatMessages.scrollTop;
-});
-
-function updateCharCounter() {
-    const length = messageInput.value.length;
-    if (maxChars === 999999) {
-        charCounterSpan.textContent = length + ' / Unlimited';
-    } else {
-        charCounterSpan.textContent = length + ' / ' + maxChars;
-    }
-    if (length > maxChars && maxChars !== 999999) {
-        messageInput.value = messageInput.value.substring(0, maxChars);
-        updateCharCounter();
-    }
-}
-
-if (messageInput) {
-    messageInput.addEventListener('input', () => {
-        updateCharCounter();
-        sendTypingIndicator();
-    });
-}
-
-function sendTypingIndicator() {
-    if (typingTimeout) clearTimeout(typingTimeout);
-    
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            type: 'typing',
-            is_typing: true
-        }));
-    }
-    
-    typingTimeout = setTimeout(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-                type: 'typing',
-                is_typing: false
-            }));
-        }
-    }, 2000);
-}
-
-function showTypingIndicator(username) {
-    const existingIndicator = document.querySelector('.typing-indicator');
-    if (existingIndicator) existingIndicator.remove();
-    
-    const indicator = document.createElement('div');
-    indicator.className = 'typing-indicator message-received';
-    indicator.style.padding = '0.5rem 1rem';
-    indicator.style.fontSize = '0.75rem';
-    indicator.style.fontStyle = 'italic';
-    indicator.textContent = username + ' is typing...';
-    chatMessages.appendChild(indicator);
-    scrollToBottomIfNeeded();
-    
-    setTimeout(() => {
-        if (indicator.parentNode) indicator.remove();
-    }, 3000);
-}
-
-function connectWebSocket() {
-    const protocol = 'wss:';  // Always use WSS for HTTPS
-    const wsUrl = `${protocol}//${window.location.host}/chat/ws/${conversationId}`;
-    
-    ws = new WebSocket(wsUrl);
-    
-    ws.onopen = function() {
-        reconnectAttempts = 0;
-    };
-    
-    ws.onmessage = function(event) {
-        const data = JSON.parse(event.data);
-        
-        if (data.type === 'new_message') {
-            addMessageToChat(data.message, data.message.sender_id === currentUserId);
-            scrollToBottomIfNeeded();
-        } else if (data.type === 'message_sent') {
-            const tempDiv = document.querySelector('.message[data-message-id="temp"]');
-            if (tempDiv) {
-                tempDiv.setAttribute('data-message-id', data.message.id);
-                const statusSpan = tempDiv.querySelector('.message-status');
-                if (statusSpan) statusSpan.textContent = 'Sent';
-            }
-        } else if (data.type === 'message_read') {
-            const messageDiv = document.querySelector(`.message[data-message-id="${data.message_id}"]`);
-            if (messageDiv) {
-                const statusSpan = messageDiv.querySelector('.message-status');
-                if (statusSpan) statusSpan.textContent = 'Read';
-            }
-        } else if (data.type === 'status') {
-            updateUserStatus(data.status);
-        } else if (data.type === 'typing') {
-            showTypingIndicator(data.username);
-        }
-    };
-    
-    ws.onclose = function() {
-        updateUserStatus('offline');
-        if (reconnectAttempts < maxReconnectAttempts) {
-            reconnectAttempts++;
-            setTimeout(connectWebSocket, 3000);
-        }
-    };
-}
-
-function updateUserStatus(status) {
-    if (status === 'online') {
-        statusDot.className = 'status-dot online';
-        statusText.textContent = 'Online';
-    } else {
-        statusDot.className = 'status-dot offline';
-        statusText.textContent = 'Offline';
-    }
-}
-
-function sendMessageViaWebSocket(content) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({
-            type: 'message',
-            content: content
-        }));
-        return true;
-    }
-    return false;
-}
-
-function addMessageToChat(message, isSentByCurrentUser) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = 'message ' + (isSentByCurrentUser ? 'message-sent' : 'message-received');
-    messageDiv.setAttribute('data-message-id', message.id || 'temp');
-    const timeStr = new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    messageDiv.innerHTML = `
-        <div class="message-content">${escapeHtml(message.content)}</div>
-        <div class="message-footer">
-            <span class="message-time">${timeStr}</span>
-            <span class="message-status">${isSentByCurrentUser ? 'Sent' : ''}</span>
-            <button class="reaction-trigger" data-message-id="${message.id || 'temp'}">[React]</button>
-            <span class="message-expiry" data-expires="${message.expires_at}"></span>
-        </div>
-    `;
-    chatMessages.appendChild(messageDiv);
-    
-    const trigger = messageDiv.querySelector('.reaction-trigger');
-    if (trigger) {
-        trigger.addEventListener('click', () => showReactionModal(trigger.dataset.messageId));
-    }
-    
-    updateExpiryTimers();
-    
-    if (!isSentByCurrentUser && message.id !== 'temp') {
-        fetch(`/chat/mark_read/${message.id}`, { method: 'POST' });
-    }
-}
-
-function sendMessage() {
-    const content = messageInput.value.trim();
-    if (!content) return;
-    if (content.length > maxChars && maxChars !== 999999) {
-        if (window.toast) window.toast.error('Message exceeds character limit');
-        return;
-    }
-    
-    const tempMessage = {
-        id: 'temp',
-        content: content,
-        created_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-    };
-    
-    addMessageToChat(tempMessage, true);
-    messageInput.value = '';
-    updateCharCounter();
-    scrollToBottomIfNeeded();
-    
-    if (!sendMessageViaWebSocket(content)) {
-        const formData = new FormData();
-        formData.append('recipient_id', otherUserId);
-        formData.append('content', content);
-        fetch('/chat/send', {
-            method: 'POST',
-            body: formData
-        })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                const tempDiv = document.querySelector('.message[data-message-id="temp"]');
-                if (tempDiv) {
-                    tempDiv.setAttribute('data-message-id', data.message.id);
-                    const statusSpan = tempDiv.querySelector('.message-status');
-                    if (statusSpan) statusSpan.textContent = 'Sent';
-                }
-            } else {
-                if (window.toast) window.toast.error('Error: ' + escapeHtml(data.error));
-                const tempDiv = document.querySelector('.message[data-message-id="temp"]');
-                if (tempDiv) tempDiv.remove();
-            }
-        })
-        .catch(err => {
-            if (window.toast) window.toast.error('Error sending message: ' + escapeHtml(err.message));
-            const tempDiv = document.querySelector('.message[data-message-id="temp"]');
-            if (tempDiv) tempDiv.remove();
+document.addEventListener('DOMContentLoaded', function() {
+    // Username profile click handler
+    const usernameBtn = document.getElementById('usernameProfileBtn');
+    if (usernameBtn) {
+        usernameBtn.addEventListener('click', function() {
+            const username = this.textContent;
+            showUserProfile(username);
         });
     }
-}
-
-function blockUser() {
-    if (confirm('Block ' + otherUsername + '? You will no longer receive messages from this user.')) {
-        fetch('/chat/block/' + otherUserId, { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    if (window.toast) window.toast.success('User blocked successfully');
-                    location.reload();
-                } else {
-                    if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to block user'));
-                }
-            });
-    }
-}
-
-function unblockUser() {
-    if (confirm('Unblock ' + otherUsername + '? You will be able to send messages again.')) {
-        fetch('/chat/unblock/' + otherUserId, { method: 'POST' })
-            .then(res => res.json())
-            .then(data => {
-                if (data.success) {
-                    if (window.toast) window.toast.success('User unblocked successfully');
-                    location.reload();
-                } else {
-                    if (window.toast) window.toast.error(escapeHtml(data.error || 'Failed to unblock user'));
-                }
-            });
-    }
-}
-
-function showReactionModal(messageId) {
-    currentMessageIdForReaction = messageId;
-    document.getElementById('reactionModal').style.display = 'block';
     
-    document.querySelectorAll('.reaction-option').forEach(btn => {
-        btn.onclick = () => {
-            const reactionType = btn.dataset.reaction;
-            addReaction(currentMessageIdForReaction, reactionType);
-            closeReactionModal();
-        };
-    });
-}
-
-function closeReactionModal() {
-    document.getElementById('reactionModal').style.display = 'none';
-    currentMessageIdForReaction = null;
-}
-
-function addReaction(messageId, reactionType) {
-    if (window.toast) window.toast.info('Reactions coming soon for private chats');
-    closeReactionModal();
-}
-
-function updateExpiryTimers() {
-    const expirySpans = document.querySelectorAll('.message-expiry');
-    const now = new Date();
-    expirySpans.forEach(span => {
-        const expiryTime = new Date(span.dataset.expires);
-        const diff = expiryTime - now;
-        if (diff <= 0) {
-            span.textContent = '[Expired]';
-            span.closest('.message').style.opacity = '0.5';
-        } else {
-            const hours = Math.floor(diff / 3600000);
-            const minutes = Math.floor((diff % 3600000) / 60000);
-            span.textContent = `Expires in: ${hours}h ${minutes}m`;
+    // Block/Unblock handlers (will be connected to chatManager after initialization)
+    const blockBtn = document.getElementById('blockBtn');
+    const unblockBtn = document.getElementById('unblockBtn');
+    
+    // The chatManager will be initialized by chat.js
+    // We'll use a small delay to ensure chatManager exists
+    setTimeout(function() {
+        if (blockBtn && window.chatManager) {
+            blockBtn.addEventListener('click', () => window.chatManager.blockUser());
         }
-    });
-}
+        if (unblockBtn && window.chatManager) {
+            unblockBtn.addEventListener('click', () => window.chatManager.unblockUser());
+        }
+    }, 100);
+    
+    // Close reaction modal
+    const closeReactionBtn = document.getElementById('closeReactionModal');
+    if (closeReactionBtn && window.chatManager) {
+        closeReactionBtn.addEventListener('click', () => {
+            if (window.chatManager) window.chatManager.closeReactionModal();
+            else document.getElementById('reactionModal').style.display = 'none';
+        });
+    }
+});
 
 function showUserProfile(username) {
     fetch(`/api/user/${encodeURIComponent(username)}`)
@@ -813,26 +533,11 @@ function showUserProfile(username) {
         });
 }
 
-if (sendBtn) {
-    sendBtn.addEventListener('click', sendMessage);
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
-if (messageInput) {
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
-}
-
-chatMessages.scrollTop = chatMessages.scrollHeight;
-connectWebSocket();
-updateExpiryTimers();
-setInterval(updateExpiryTimers, 1000);
-updateCharCounter();
-
-document.querySelectorAll('.reaction-trigger').forEach(trigger => {
-    trigger.addEventListener('click', () => showReactionModal(trigger.dataset.messageId));
-});
 </script>
 {% endblock %}
