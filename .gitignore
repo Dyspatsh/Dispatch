@@ -7,39 +7,63 @@ __pycache__/
 venv/
 env/
 ENV/
+.venv/
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
 
-# Environment
+# Environment (REAL secrets - NEVER commit)
 .env
 .env.local
+.env.production
+
+# Certificates and SSL (NEVER commit - these are your private keys)
+*.pem
+*.key
+*.crt
+*.csr
+*.der
+certs/
+ssl/
+*.p12
+*.pfx
 
 # Logs
 *.log
 logs/
 *.pid
+*.log.*
 
-# Uploads
+# Uploads (user data - NEVER commit)
+uploads/
 uploads/*.enc
 uploads/*.tmp
+uploads/*.decrypted
 
-# Backups
+# Backups (NEVER commit)
 backups/
 *.sql
 *.sql.gz
+*.backup
+*.dump
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.project
+.pydevproject
+.settings/
 
 # OS
 .DS_Store
 Thumbs.db
+.desktop.ini
+ehthumbs.db
 
 # Temporary files
 *.tmp
@@ -47,7 +71,72 @@ Thumbs.db
 *.backup
 *.corrupted
 *.new
+temp/
+tmp/
+
+# Test files (keep your tests separate)
 test_*.py
+*_test.py
+tests_*.py
 check_*.py
 add_*.py
 fix_*.py
+debug_*.py
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.tox/*
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+
+# Distribution
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Service files (system-specific)
+*.service
+*.timer
+*.socket
+*.target
+dispatch.service
+
+# Tor configuration (contains your onion address)
+torrc
+*.onion
+hidden_service/
+
+# Secrets and keys
+*.secret
+*.key
+*.priv
+*.private
+secrets/
+keys/
+
+# Docker (if you use it)
+*.dockerignore
+Dockerfile
+docker-compose.yml
+docker-compose.override.yml
+
+# Jupyter notebooks (if any)
+*.ipynb
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# pyre
+.pyre/
+
+# pytype
+.pytype/

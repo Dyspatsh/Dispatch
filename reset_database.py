@@ -7,6 +7,7 @@ Run with: python3 reset_database.py
 
 import os
 import sys
+import re
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -48,22 +49,63 @@ def get_owner_credentials():
     while True:
         username = input("Username (min 3 chars, max 16): ").strip()
         if 3 <= len(username) <= 16:
-            break
-        print("Username must be between 3 and 16 characters")
-    
-    while True:
-        password = input("Password (min 8 chars, at least 1 capital, 1 number, 1 symbol): ").strip()
-        if len(password) >= 8:
-            import re
-            if re.search(r'[A-Z]', password) and re.search(r'[0-9]', password) and re.search(r'[!@#$%^&*(),.?":{}|<>]', password):
+            if re.match(r'^[a-zA-Z0-9_]+$', username):
                 break
-        print("Password must have at least 8 chars, 1 capital letter, 1 number, and 1 symbol")
+            print("Username can only contain letters, numbers, and underscores")
+        else:
+            print("Username must be between 3 and 16 characters")
     
     while True:
-        pin = input("6-Digit PIN: ").strip()
-        if len(pin) == 6 and pin.isdigit():
-            break
-        print("PIN must be exactly 6 digits")
+        print("\nPassword requirements:")
+        print("  - At least 12 characters (no maximum)")
+        print("  - At least 3 of: uppercase, lowercase, numbers, symbols")
+        print("  - No common weak patterns")
+        print("  - No 4+ repeated characters in a row")
+        password = input("Password: ").strip()
+        
+        # Validate password strength
+        if len(password) < 12:
+            print("Password must be at least 12 characters")
+            continue
+        
+        common_patterns = ['password', '123456', 'qwerty', 'abc123', 'admin', 'welcome']
+        if any(pattern in password.lower() for pattern in common_patterns):
+            print("Password contains common weak pattern")
+            continue
+        
+        has_upper = bool(re.search(r'[A-Z]', password))
+        has_lower = bool(re.search(r'[a-z]', password))
+        has_digit = bool(re.search(r'[0-9]', password))
+        has_special = bool(re.search(r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>/?\\|]', password))
+        
+        types_found = sum([has_upper, has_lower, has_digit, has_special])
+        
+        if types_found < 3:
+            print("Password must contain at least 3 of: uppercase, lowercase, numbers, symbols")
+            continue
+        
+        if re.search(r'(.)\1{3,}', password):
+            print("Password cannot have 4+ repeated characters in a row")
+            continue
+        
+        break
+    
+    while True:
+        pin = input("6-Digit PIN (cannot be sequential or all same digit): ").strip()
+        if len(pin) != 6:
+            print("PIN must be exactly 6 digits")
+            continue
+        if not pin.isdigit():
+            print("PIN must contain only numbers")
+            continue
+        sequential = ['123456', '234567', '345678', '456789', '567890', '098765', '987654', '876543', '765432', '654321']
+        if pin in sequential:
+            print("PIN cannot be sequential numbers")
+            continue
+        if len(set(pin)) == 1:
+            print("PIN cannot have all the same digit")
+            continue
+        break
     
     return username, password, pin
 
@@ -108,7 +150,6 @@ def create_owner_user(username, password, pin):
     from passlib.context import CryptContext
     from database import SessionLocal, User
     import secrets
-    import re
     
     pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
     db = SessionLocal()
@@ -123,7 +164,7 @@ def create_owner_user(username, password, pin):
         recovery_phrase = ''.join(secrets.choice(chars) for _ in range(64))
         recovery_phrase_hash = pwd_context.hash(recovery_phrase)
         
-        # Create owner
+        # Create owner - USING USER-PROVIDED CREDENTIALS (NOT HARDCODED)
         new_owner = User(
             username=username,
             password_hash=password_hash,
@@ -146,6 +187,8 @@ def create_owner_user(username, password, pin):
         print(recovery_phrase)
         print("="*60)
         print("\nYou will need this recovery phrase if you forget your password.")
+        print("\n⚠️  WARNING: Save this recovery phrase immediately!")
+        print("   You will NOT be able to recover your account without it.")
         
     except Exception as e:
         print(f"Error creating owner: {e}")

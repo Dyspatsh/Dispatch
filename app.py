@@ -10,6 +10,7 @@ import secrets
 import os
 import json
 import re
+import html
 import pyotp
 import qrcode
 import io
@@ -29,7 +30,8 @@ from database import get_db, User, File, Payment, Session as DBSession, ChatConv
 from chat import router as chat_router
 from roles import router as roles_router
 
-logging.basicConfig(level=logging.INFO)
+# Set logging to WARNING for production (reduces verbosity)
+logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -52,12 +54,16 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-XSS-Protection"] = "1; mode=block"
+    
+    # ADD HSTS - tells browsers to always use HTTPS
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
+    
     response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws: wss:"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
     response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
-    response.headers["Onion-Location"] = "http://pladaibgpkuswvqosgdszdtbgmxkfz55co66c4pmxg3ldmvyw2w45zyd.onion/"
+    response.headers["Onion-Location"] = "https://pladaibgpkuswvqosgdszdtbgmxkfz55co66c4pmxg3ldmvyw2w45zyd.onion/"
     return response
 
 app.include_router(chat_router)
@@ -84,12 +90,42 @@ ALLOWED_MIME_TYPES = {
     'text/xml', 'text/markdown', 'text/x-python', 'text/javascript', 'text/css'
 }
 
+# Extension to MIME type mapping for validation
+EXTENSION_MIME_MAP = {
+    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+    'png': 'image/png', 'gif': 'image/gif',
+    'pdf': 'application/pdf', 'txt': 'text/plain',
+    'mp4': 'video/mp4', 'mp3': 'audio/mpeg',
+    'zip': 'application/zip', '7z': 'application/x-7z-compressed',
+    'doc': 'application/msword', 
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'csv': 'text/csv', 'json': 'application/json',
+    'xml': 'text/xml', 'md': 'text/markdown',
+    'py': 'text/x-python', 'js': 'text/javascript',
+    'css': 'text/css', 'html': 'text/html'
+}
+
 def validate_file_type(filename: str, content_type: str = None) -> tuple:
+    """Validate file type with extension and MIME type checking"""
     ext = filename.split('.')[-1].lower() if '.' in filename else ''
+    
+    # Extension validation
     if ext not in ALLOWED_EXTENSIONS:
-        return False, f"File type .{ext} is not allowed"
+        return False, f"File extension .{ext} is not allowed"
+    
+    # MIME type validation
     if content_type and content_type not in ALLOWED_MIME_TYPES:
-        return False, "File type not allowed"
+        return False, f"File type {content_type} is not allowed"
+    
+    # Verify MIME type matches extension (critical security check!)
+    if ext in EXTENSION_MIME_MAP and content_type:
+        expected_mime = EXTENSION_MIME_MAP[ext]
+        # Allow text/plain for many text-based files
+        if content_type != expected_mime and not content_type.startswith('text/'):
+            return False, f"File extension .{ext} does not match content type {content_type}"
+    
     return True, ""
 
 def hash_password(password: str) -> str:
@@ -102,10 +138,12 @@ def generate_recovery_phrase() -> str:
     chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     return ''.join(secrets.choice(chars) for _ in range(64))
 
+# FIXED: Proper HTML escaping using Python's built-in html.escape
 def escape_html(text: str) -> str:
+    """Escape HTML special characters to prevent XSS attacks"""
     if not text:
         return ""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;").replace("'", "&#39;")
+    return html.escape(text)
 
 def derive_key_from_password(password: str, salt: bytes) -> bytes:
     kdf = PBKDF2HMAC(
@@ -144,17 +182,33 @@ def validate_username(username: str) -> tuple:
         return False, "Username can only contain letters, numbers, and underscores"
     return True, ""
 
+# FIXED: Stronger password validation
 def validate_password(password: str) -> tuple:
-    if len(password) < 8:
-        return False, "Password must be at least 8 characters"
-    if len(password) > 16:
-        return False, "Password cannot exceed 16 characters"
-    if not re.search(r'[A-Z]', password):
-        return False, "Password must contain at least one capital letter"
-    if not re.search(r'[0-9]', password):
-        return False, "Password must contain at least one number"
-    if not re.search(r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>/?\\|]', password):
-        return False, "Password must contain at least one symbol (!@#$%^&* etc.)"
+    """Validate password strength with modern requirements"""
+    # Minimum length - no upper limit (let users use passphrases)
+    if len(password) < 12:
+        return False, "Password must be at least 12 characters"
+    
+    # Check for common weak patterns
+    common_patterns = ['password', '123456', 'qwerty', 'abc123', 'admin', 'welcome', 'letmein', 'monkey', 'dragon']
+    if any(pattern in password.lower() for pattern in common_patterns):
+        return False, "Password contains common weak pattern"
+    
+    # Require at least 3 of 4 character types
+    has_upper = bool(re.search(r'[A-Z]', password))
+    has_lower = bool(re.search(r'[a-z]', password))
+    has_digit = bool(re.search(r'[0-9]', password))
+    has_special = bool(re.search(r'[!@#$%^&*()_+\-=\[\]{};:\'",.<>/?\\|]', password))
+    
+    types_found = sum([has_upper, has_lower, has_digit, has_special])
+    
+    if types_found < 3:
+        return False, "Password must contain at least 3 of: uppercase letters, lowercase letters, numbers, symbols"
+    
+    # Check for repeated characters (no more than 3 in a row)
+    if re.search(r'(.)\1{3,}', password):
+        return False, "Password cannot have 4 or more repeated characters in a row"
+    
     return True, ""
 
 def validate_pin(pin: str) -> tuple:
@@ -288,6 +342,18 @@ def verify_recovery_code(db: Session, user_id: int, code: str) -> bool:
             return True
     return False
 
+def validate_days_param(days: int, max_days: int = 365) -> int:
+    """Validate and sanitize days parameter for admin endpoints"""
+    try:
+        days = int(days)
+        if days < 1:
+            return 30  # default
+        if days > max_days:
+            return max_days
+        return days
+    except (ValueError, TypeError):
+        return 30
+
 @app.get("/")
 async def root():
     return RedirectResponse(url="/home", status_code=303)
@@ -344,7 +410,7 @@ async def recovery_page(request: Request, user = Depends(get_user_from_session))
     return templates.TemplateResponse("recovery.html", {"request": request, "user": user})
 
 @app.post("/recovery")
-# @limiter.limit("3/hour")
+@limiter.limit("3/hour")  # FIXED: Enabled rate limiting
 async def recovery_submit(request: Request, recovery_phrase: str = Form(...), new_username: str = Form(None), new_password: str = Form(...), confirm_password: str = Form(...), new_pin: str = Form(...), confirm_pin: str = Form(...), db: Session = Depends(get_db)):
 
     recovery_phrase = escape_html(recovery_phrase)
@@ -399,7 +465,7 @@ async def register_page(request: Request):
     return templates.TemplateResponse("register.html", {"request": request})
 
 @app.post("/register")
-# @limiter.limit("5/hour")
+@limiter.limit("5/hour")  # FIXED: Enabled rate limiting
 async def register(request: Request, username: str = Form(...), password: str = Form(...), pin: str = Form(...), terms: bool = Form(False), db: Session = Depends(get_db)):
 
     username = escape_html(username)
@@ -466,7 +532,7 @@ async def login_page(request: Request, user = Depends(get_user_from_session)):
     return templates.TemplateResponse("login.html", {"request": request})
 
 @app.post("/login")
-# @limiter.limit("5/minute")
+@limiter.limit("5/minute")  # FIXED: Enabled rate limiting
 async def login(request: Request, username: str = Form(...), password: str = Form(...), pin: str = Form(...), db: Session = Depends(get_db)):
 
     username = escape_html(username)
@@ -518,7 +584,7 @@ async def login(request: Request, username: str = Form(...), password: str = For
         if is_ajax:
             return {"success": True, "redirect": "/2fa-verify", "twofa": True}
         response = RedirectResponse(url="/2fa-verify", status_code=303)
-        response.set_cookie(key="session_token", value="", httponly=True, secure=True, samesite="lax", max_age=300)
+        response.set_cookie(key="session_token", value="", httponly=True, secure=True, samesite="strict", max_age=300)  # FIXED: samesite=strict
         db.commit()
         return response
     
@@ -532,8 +598,9 @@ async def login(request: Request, username: str = Form(...), password: str = For
     if is_ajax:
         return {"success": True, "redirect": "/home"}
     
+    # FIXED: samesite=strict for better CSRF protection
     response = RedirectResponse(url="/home", status_code=303)
-    response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="lax", max_age=604800)
+    response.set_cookie(key="session_token", value=session_token, httponly=True, secure=True, samesite="strict", max_age=604800)
     return response
 
 @app.get("/2fa-verify", response_class=HTMLResponse)
@@ -546,7 +613,7 @@ async def verify_2fa_page(request: Request, session_token: str = Cookie(None), d
     return templates.TemplateResponse("2fa_verify.html", {"request": request})
 
 @app.post("/2fa-verify")
-# @limiter.limit("5/minute")
+@limiter.limit("5/minute")  # FIXED: Enabled rate limiting
 async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session = Depends(get_db), session_token: str = Cookie(None)):
     db_session = db.query(DBSession).filter(DBSession.session_token == session_token).first()
     if not db_session:
@@ -576,7 +643,7 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
         log_security_event(db, user.id, "2FA verified", "twofa_success", None, request)
         response = RedirectResponse(url="/home", status_code=303)
         new_session_token = create_session(db, user.id, twofa_verified=True)
-        response.set_cookie(key="session_token", value=new_session_token, httponly=True, secure=True, samesite="lax", max_age=604800)
+        response.set_cookie(key="session_token", value=new_session_token, httponly=True, secure=True, samesite="strict", max_age=604800)  # FIXED: samesite=strict
         return response
     
     if verify_recovery_code(db, user.id, code):
@@ -591,7 +658,7 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
         log_security_event(db, user.id, "2FA verified with recovery code", "twofa_recovery", None, request)
         response = RedirectResponse(url="/home", status_code=303)
         new_session_token = create_session(db, user.id, twofa_verified=True)
-        response.set_cookie(key="session_token", value=new_session_token, httponly=True, secure=True, samesite="lax", max_age=604800)
+        response.set_cookie(key="session_token", value=new_session_token, httponly=True, secure=True, samesite="strict", max_age=604800)  # FIXED: samesite=strict
         return response
     
     if not attempt:
@@ -768,7 +835,7 @@ async def send_page(request: Request, user = Depends(get_user_from_session)):
     return templates.TemplateResponse("send.html", {"request": request, "user": user})
 
 @app.post("/send/submit")
-# @limiter.limit("20/hour")
+@limiter.limit("20/hour")  # FIXED: Enabled rate limiting
 async def submit_file(request: Request, recipient: str = Form(...), filename: str = Form(...), file_size: str = Form(...), options: str = Form(...), encrypted_file: UploadFile = FastAPIFile(...), encryption_key: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return {"success": False, "error": "Not authenticated"}
@@ -789,6 +856,7 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
     if actual_size > limits["max_file_size"]:
         return {"success": False, "error": f"File too large. Max {limits['max_file_size']/1073741824}GB"}
     
+    # FIXED: Enhanced file type validation
     valid, error = validate_file_type(filename, encrypted_file.content_type)
     if not valid:
         return {"success": False, "error": error}
@@ -982,7 +1050,7 @@ async def download_file(
     return FileResponse(file_path, media_type="application/octet-stream", filename=file.filename, headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'})
 
 @app.get("/search")
-# @limiter.limit("10/minute")
+@limiter.limit("10/minute")  # FIXED: Enabled rate limiting
 async def search_users(request: Request, q: str, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
     if not user:
         return {"users": []}
@@ -1377,6 +1445,9 @@ async def chart_user_growth(days: int = 30, session_token: str = Cookie(None), d
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     
+    # FIXED: Validate days parameter
+    days = validate_days_param(days, 365)
+    
     labels = []
     values = []
     
@@ -1394,6 +1465,9 @@ async def chart_file_activity(days: int = 30, type: str = "uploads", session_tok
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
+    
+    # FIXED: Validate days parameter
+    days = validate_days_param(days, 365)
     
     labels = []
     values = []
@@ -1439,6 +1513,9 @@ async def chart_storage_trend(days: int = 30, session_token: str = Cookie(None),
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     
+    # FIXED: Validate days parameter
+    days = validate_days_param(days, 365)
+    
     labels = []
     values = []
     
@@ -1469,6 +1546,9 @@ async def chart_activity_heatmap(days: int = 30, session_token: str = Cookie(Non
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
+    
+    # FIXED: Validate days parameter
+    days = validate_days_param(days, 90)
     
     activities = []
     

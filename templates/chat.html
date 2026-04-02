@@ -528,7 +528,7 @@ function showTypingIndicator(username) {
 }
 
 function connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const protocol = 'wss:';  // Always use WSS for HTTPS
     const wsUrl = `${protocol}//${window.location.host}/chat/ws/${conversationId}`;
     
     ws = new WebSocket(wsUrl);
