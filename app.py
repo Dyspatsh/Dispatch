@@ -1,43 +1,44 @@
 from fastapi import FastAPI, Request, Form, Depends, File as FastAPIFile, UploadFile, Cookie, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, desc, and_
-from passlib.context import CryptContext
+from sqlalchemy import func, desc, and_, text
 from datetime import datetime, timedelta
 import secrets
 import os
 import json
 import re
-import html
 import pyotp
 import qrcode
 import io
 import base64
 import psutil
 import logging
-import hashlib
+import subprocess
 from dotenv import load_dotenv
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from nacl.public import SealedBox, PublicKey, PrivateKey
+from nacl.exceptions import CryptoError
 
-from database import get_db, User, File, Payment, Session as DBSession, ChatConversation, ChatMessage, BlockedUser, LoginHistory, SecurityLog, CSRFToken, FailedLoginAttempt, hash_ip_address
+from database import get_db, User, File, Payment, Session as DBSession, ChatConversation, ChatMessage, BlockedUser, LoginHistory, SecurityLog, CSRFToken, FailedLoginAttempt
 from chat import router as chat_router
 from roles import router as roles_router
+from utils import (
+    escape_html, hash_ip_address, get_client_ip, log_security_event, 
+    is_user_blocked, get_current_user, verify_password, hash_password,
+    get_user_from_session
+)
 
-# Set logging to WARNING for production
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("SECRET_KEY must be set in .env file")
@@ -47,7 +48,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = FastAPI(title="Dispatch")
 
-# Rate limiter with per-IP tracking
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -59,26 +59,27 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # ============================================
-# ALLOWED FILE TYPES
+# ALLOWED FILE TYPES (FIXED)
 # ============================================
 
 ALLOWED_EXTENSIONS = {
     'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'mp4', 'mp3', 'zip', '7z', 'tar', 'gz',
     'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'rtf', 'csv', 'json',
-    'xml', 'md', 'log', 'py', 'c', 'cpp', 'h', 'java', 'js', 'css', 'html'
+    'xml', 'md', 'log', 'py', 'c', 'cpp', 'h', 'java', 'js', 'css', 'html', 'webp'
 }
 
 ALLOWED_MIME_TYPES = {
-    'image/jpeg', 'image/png', 'image/gif', 'application/pdf', 'text/plain',
+    'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf', 'text/plain',
     'video/mp4', 'audio/mpeg', 'application/zip', 'application/x-7z-compressed',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/msword', 'application/vnd.ms-excel', 'text/csv', 'application/json',
-    'text/xml', 'text/markdown', 'text/x-python', 'text/javascript', 'text/css'
+    'text/xml', 'text/markdown', 'text/x-python', 'text/javascript', 'text/css',
+    'application/octet-stream'
 }
 
 EXTENSION_MIME_MAP = {
-    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+    'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'webp': 'image/webp',
     'png': 'image/png', 'gif': 'image/gif',
     'pdf': 'application/pdf', 'txt': 'text/plain',
     'mp4': 'video/mp4', 'mp3': 'audio/mpeg',
@@ -97,75 +98,7 @@ EXTENSION_MIME_MAP = {
 # HELPER FUNCTIONS
 # ============================================
 
-def get_client_ip(request: Request) -> str:
-    """Extract client IP from request (handles proxies)"""
-    if "x-forwarded-for" in request.headers:
-        return request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-def escape_html(text: str) -> str:
-    """Escape HTML special characters to prevent XSS attacks"""
-    if not text:
-        return ""
-    return html.escape(text)
-
-def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
-
-def generate_recovery_phrase() -> str:
-    chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    return ''.join(secrets.choice(chars) for _ in range(64))
-
-def generate_recovery_codes() -> list:
-    return [secrets.token_hex(4).upper() for _ in range(10)]
-
-def hash_recovery_codes(codes: list) -> list:
-    return [hash_password(code) for code in codes]
-
-def verify_recovery_code(db: Session, user_id: int, code: str) -> bool:
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user or not user.recovery_codes_hash:
-        return False
-    hashed_codes = json.loads(user.recovery_codes_hash)
-    code_upper = code.upper()
-    for hashed_code in hashed_codes:
-        if verify_password(code_upper, hashed_code):
-            hashed_codes.remove(hashed_code)
-            user.recovery_codes_hash = json.dumps(hashed_codes)
-            db.commit()
-            return True
-    return False
-
-def derive_key_from_password(password: str, salt: bytes) -> bytes:
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=100000,
-        backend=default_backend()
-    )
-    return kdf.derive(password.encode())
-
-def encrypt_aes_key(aes_key: bytes, user_password: str) -> tuple:
-    salt = secrets.token_bytes(16)
-    derived_key = derive_key_from_password(user_password, salt)
-    iv = secrets.token_bytes(12)
-    cipher = Cipher(algorithms.AES(derived_key), modes.GCM(iv), backend=default_backend())
-    encryptor = cipher.encryptor()
-    encrypted_key = encryptor.update(aes_key) + encryptor.finalize()
-    return salt, iv, encrypted_key, encryptor.tag
-
-def decrypt_aes_key(encrypted_key_data: bytes, user_password: str, salt: bytes, iv: bytes, tag: bytes) -> bytes:
-    derived_key = derive_key_from_password(user_password, salt)
-    cipher = Cipher(algorithms.AES(derived_key), modes.GCM(iv, tag), backend=default_backend())
-    decryptor = cipher.decryptor()
-    return decryptor.update(encrypted_key_data) + decryptor.finalize()
-
 def sanitize_filename(filename: str) -> str:
-    """Sanitize filename to prevent path traversal attacks"""
     if not filename:
         return "file"
     filename = filename.replace('/', '_').replace('\\', '_')
@@ -183,15 +116,39 @@ def sanitize_filename(filename: str) -> str:
 
 def validate_file_type(filename: str, content_type: str = None) -> tuple:
     ext = filename.split('.')[-1].lower() if '.' in filename else ''
+    
     if ext not in ALLOWED_EXTENSIONS:
         return False, f"File extension .{ext} is not allowed"
+    
+    # Allow octet-stream for images and common files
+    if content_type == "application/octet-stream":
+        if ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'mp4', 'mp3', 'pdf', 'zip', 'txt']:
+            return True, ""
+    
     if content_type and content_type not in ALLOWED_MIME_TYPES:
+        if ext in ALLOWED_EXTENSIONS:
+            return True, ""
         return False, f"File type {content_type} is not allowed"
-    if ext in EXTENSION_MIME_MAP and content_type:
-        expected_mime = EXTENSION_MIME_MAP[ext]
-        if content_type != expected_mime and not content_type.startswith('text/'):
-            return False, f"File extension .{ext} does not match content type {content_type}"
+    
     return True, ""
+
+def scan_file_for_viruses(file_path: str) -> tuple:
+    try:
+        result = subprocess.run(
+            ['clamscan', '--no-summary', file_path],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if 'FOUND' in result.stdout:
+            return False, "Virus detected in file"
+        return True, ""
+    except FileNotFoundError:
+        logger.warning("ClamAV not installed, virus scanning disabled")
+        return True, ""
+    except Exception as e:
+        logger.error(f"Virus scan failed: {str(e)}")
+        return False, "Virus scan failed"
 
 def validate_username(username: str) -> tuple:
     if len(username) < 3:
@@ -203,7 +160,6 @@ def validate_username(username: str) -> tuple:
     return True, ""
 
 def validate_password(password: str, username: str = None) -> tuple:
-    """Validate password strength with modern requirements"""
     if len(password) < 12:
         return False, "Password must be at least 12 characters"
     if len(password) > 128:
@@ -218,10 +174,6 @@ def validate_password(password: str, username: str = None) -> tuple:
     if username and username.lower() in password.lower():
         return False, "Password cannot contain your username"
     
-    keyboard_patterns = ['qwerty', 'asdfgh', 'zxcvbn', '123456', 'abcdef', 'qwertyuiop', 'asdfghjkl']
-    if any(pattern in password.lower() for pattern in keyboard_patterns):
-        return False, "Password contains sequential keyboard pattern"
-    
     has_upper = bool(re.search(r'[A-Z]', password))
     has_lower = bool(re.search(r'[a-z]', password))
     has_digit = bool(re.search(r'[0-9]', password))
@@ -234,11 +186,6 @@ def validate_password(password: str, username: str = None) -> tuple:
     
     if re.search(r'(.)\1{3,}', password):
         return False, "Password cannot have 4 or more repeated characters in a row"
-    
-    for i in range(10):
-        sequential = ''.join(str((j % 10)) for j in range(i, i+4))
-        if sequential in password:
-            return False, "Password cannot contain sequential numbers"
     
     return True, ""
 
@@ -277,49 +224,34 @@ def validate_csrf_token(token: str, user_id: int, db: Session) -> bool:
 def create_session(db: Session, user_id: int, twofa_verified: bool = False) -> str:
     session_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(days=7)
-    db_session = DBSession(session_token=session_token, user_id=user_id, expires_at=expires_at, twofa_verified=twofa_verified)
+    db_session = DBSession(session_token=session_token, user_id=user_id, expires_at=expires_at, twofa_verified=twofa_verified, last_activity=datetime.utcnow())
     db.add(db_session)
     db.commit()
     return session_token
 
-def get_current_user(db: Session, session_token: str = None):
-    if not session_token:
-        return None
-    db_session = db.query(DBSession).filter(DBSession.session_token == session_token, DBSession.expires_at > datetime.utcnow()).first()
-    if not db_session:
-        return None
-    user = db_session.user
-    if not user:
-        return None
-    if user and user.totp_enabled and not db_session.twofa_verified:
-        return None
-    if user and user.subscription_expires_at and user.subscription_expires_at < datetime.utcnow():
-        user.role = "user"
-        user.subscription_expires_at = None
-        db.commit()
-    return user
+def generate_recovery_phrase() -> str:
+    chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    return ''.join(secrets.choice(chars) for _ in range(64))
 
-async def get_user_from_session(request: Request, db: Session = Depends(get_db), session_token: str = Cookie(None)):
-    return get_current_user(db, session_token)
+def generate_recovery_codes() -> list:
+    return [secrets.token_hex(4).upper() for _ in range(10)]
 
-def log_security_event(db: Session, user_id: int, action: str, action_type: str, details: str = None, request: Request = None):
-    ip_hash = None
-    user_agent = None
-    if request:
-        client_ip = get_client_ip(request)
-        ip_hash = hash_ip_address(client_ip) if client_ip != "unknown" else None
-        user_agent = request.headers.get("user-agent")
-    
-    log = SecurityLog(
-        user_id=user_id,
-        action=action,
-        action_type=action_type,
-        details=details,
-        ip_hash=ip_hash,
-        user_agent=user_agent
-    )
-    db.add(log)
-    db.commit()
+def hash_recovery_codes(codes: list) -> list:
+    return [hash_password(code) for code in codes]
+
+def verify_recovery_code(db: Session, user_id: int, code: str) -> bool:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.recovery_codes_hash:
+        return False
+    hashed_codes = json.loads(user.recovery_codes_hash)
+    code_upper = code.upper()
+    for hashed_code in hashed_codes:
+        if verify_password(code_upper, hashed_code):
+            hashed_codes.remove(hashed_code)
+            user.recovery_codes_hash = json.dumps(hashed_codes)
+            db.commit()
+            return True
+    return False
 
 def record_failed_login(db: Session, username: str, request: Request = None):
     now = datetime.utcnow()
@@ -361,10 +293,6 @@ def check_login_lockout(db: Session, username: str) -> tuple:
         return True, f"Account locked. Try again in {remaining} minutes"
     return False, ""
 
-def is_user_blocked(db: Session, user_id: int, target_id: int) -> bool:
-    block = db.query(BlockedUser).filter(BlockedUser.user_id == target_id, BlockedUser.blocked_user_id == user_id).first()
-    return block is not None
-
 def validate_days_param(days: int, max_days: int = 365) -> int:
     try:
         days = int(days)
@@ -375,6 +303,9 @@ def validate_days_param(days: int, max_days: int = 365) -> int:
         return days
     except (ValueError, TypeError):
         return 30
+
+async def get_user_from_session_direct(request: Request, db: Session = Depends(get_db), session_token: str = Cookie(None)):
+    return get_current_user(db, session_token)
 
 # ============================================
 # MIDDLEWARE
@@ -423,18 +354,18 @@ async def upgrade_redirect():
     return RedirectResponse(url="/roles/upgrade", status_code=303)
 
 @app.get("/home", response_class=HTMLResponse)
-async def home_page(request: Request, user = Depends(get_user_from_session)):
+async def home_page(request: Request, user = Depends(get_user_from_session_direct)):
     return templates.TemplateResponse("home.html", {"request": request, "user": user})
 
 @app.get("/foryou", response_class=HTMLResponse)
-async def foryou_page(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def foryou_page(request: Request, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     pending_files = db.query(File).options(joinedload(File.sender)).filter(File.recipient_id == user.id, File.status == "pending").all()
     return templates.TemplateResponse("foryou.html", {"request": request, "user": user, "pending_files": pending_files})
 
 @app.get("/history", response_class=HTMLResponse)
-async def history_page(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def history_page(request: Request, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     from roles import get_history_retention_days
@@ -450,19 +381,19 @@ async def history_page(request: Request, user = Depends(get_user_from_session), 
     return templates.TemplateResponse("history.html", {"request": request, "user": user, "received_files": received_files, "sent_files": sent_files})
 
 @app.get("/about", response_class=HTMLResponse)
-async def about(request: Request, user = Depends(get_user_from_session)):
+async def about(request: Request, user = Depends(get_user_from_session_direct)):
     return templates.TemplateResponse("about.html", {"request": request, "user": user})
 
 @app.get("/thecreator", response_class=HTMLResponse)
-async def thecreator_page(request: Request, user = Depends(get_user_from_session)):
+async def thecreator_page(request: Request, user = Depends(get_user_from_session_direct)):
     return templates.TemplateResponse("thecreator.html", {"request": request, "user": user})
 
 @app.get("/terms", response_class=HTMLResponse)
-async def terms(request: Request, user = Depends(get_user_from_session)):
+async def terms(request: Request, user = Depends(get_user_from_session_direct)):
     return templates.TemplateResponse("terms.html", {"request": request, "user": user})
 
 @app.get("/recovery", response_class=HTMLResponse)
-async def recovery_page(request: Request, user = Depends(get_user_from_session)):
+async def recovery_page(request: Request, user = Depends(get_user_from_session_direct)):
     if user:
         return RedirectResponse(url="/home", status_code=303)
     return templates.TemplateResponse("recovery.html", {"request": request, "user": user})
@@ -558,13 +489,18 @@ async def register(request: Request, username: str = Form(...), password: str = 
     user_count = db.query(User).count()
     role = "owner" if user_count == 0 else "user"
     
+    private_key = PrivateKey.generate()
+    public_key = private_key.public_key
+    
     new_user = User(
         username=username,
         password_hash=hash_password(password),
         pin_hash=hash_password(pin),
         recovery_phrase_hash=hash_password(recovery_phrase),
         role=role,
-        read_receipts_enabled=True
+        read_receipts_enabled=True,
+        public_key=base64.b64encode(bytes(public_key)).decode('utf-8'),
+        private_key=base64.b64encode(bytes(private_key)).decode('utf-8')
     )
     
     db.add(new_user)
@@ -579,7 +515,7 @@ async def register(request: Request, username: str = Form(...), password: str = 
     return templates.TemplateResponse("register.html", {"request": request, "success": "Account created!", "recovery_phrase": recovery_phrase})
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, user = Depends(get_user_from_session)):
+async def login_page(request: Request, user = Depends(get_user_from_session_direct)):
     if user:
         return RedirectResponse(url="/home", status_code=303)
     return templates.TemplateResponse("login.html", {"request": request})
@@ -727,13 +663,13 @@ async def verify_2fa_submit(request: Request, code: str = Form(...), db: Session
     return templates.TemplateResponse("2fa_verify.html", {"request": request, "error": "Invalid verification code"})
 
 @app.get("/profile", response_class=HTMLResponse)
-async def profile_page(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def profile_page(request: Request, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("profile.html", {"request": request, "user": user, "now": datetime.utcnow()})
 
 @app.get("/profile/enable-2fa", response_class=HTMLResponse)
-async def enable_2fa_page(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def enable_2fa_page(request: Request, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     if not user.totp_secret:
@@ -751,7 +687,7 @@ async def enable_2fa_page(request: Request, user = Depends(get_user_from_session
 
 @app.post("/profile/enable-2fa")
 @limiter.limit("5/minute")
-async def enable_2fa_submit(request: Request, code: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def enable_2fa_submit(request: Request, code: str = Form(...), user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     totp = pyotp.TOTP(user.totp_secret)
@@ -768,7 +704,7 @@ async def enable_2fa_submit(request: Request, code: str = Form(...), user = Depe
 
 @app.post("/profile/disable-2fa")
 @limiter.limit("5/minute")
-async def disable_2fa(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def disable_2fa(request: Request, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     user.totp_enabled = False
@@ -779,14 +715,14 @@ async def disable_2fa(request: Request, user = Depends(get_user_from_session), d
     return RedirectResponse(url="/profile", status_code=303)
 
 @app.get("/profile/change-password", response_class=HTMLResponse)
-async def change_password_page(request: Request, user = Depends(get_user_from_session)):
+async def change_password_page(request: Request, user = Depends(get_user_from_session_direct)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("change_password.html", {"request": request, "user": user})
 
 @app.post("/profile/change-password")
 @limiter.limit("5/minute")
-async def change_password_submit(request: Request, current_password: str = Form(...), new_password: str = Form(...), confirm_password: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db), session_token: str = Cookie(None)):
+async def change_password_submit(request: Request, current_password: str = Form(...), new_password: str = Form(...), confirm_password: str = Form(...), user = Depends(get_user_from_session_direct), db: Session = Depends(get_db), session_token: str = Cookie(None)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     valid, error = validate_password(new_password, user.username)
@@ -810,14 +746,14 @@ async def change_password_submit(request: Request, current_password: str = Form(
     return templates.TemplateResponse("change_password.html", {"request": request, "user": user, "success": "Password changed successfully"})
 
 @app.get("/profile/change-pin", response_class=HTMLResponse)
-async def change_pin_page(request: Request, user = Depends(get_user_from_session)):
+async def change_pin_page(request: Request, user = Depends(get_user_from_session_direct)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("change_pin.html", {"request": request, "user": user})
 
 @app.post("/profile/change-pin")
 @limiter.limit("5/minute")
-async def change_pin_submit(request: Request, current_pin: str = Form(...), new_pin: str = Form(...), confirm_pin: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def change_pin_submit(request: Request, current_pin: str = Form(...), new_pin: str = Form(...), confirm_pin: str = Form(...), user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     valid, error = validate_pin(new_pin)
@@ -834,14 +770,14 @@ async def change_pin_submit(request: Request, current_pin: str = Form(...), new_
     return templates.TemplateResponse("change_pin.html", {"request": request, "user": user, "success": "PIN changed successfully"})
 
 @app.get("/profile/delete-account", response_class=HTMLResponse)
-async def delete_account_page(request: Request, user = Depends(get_user_from_session)):
+async def delete_account_page(request: Request, user = Depends(get_user_from_session_direct)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("delete_account.html", {"request": request, "user": user})
 
 @app.post("/profile/delete-account")
 @limiter.limit("3/hour")
-async def delete_account_submit(request: Request, password: str = Form(...), confirm: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def delete_account_submit(request: Request, password: str = Form(...), confirm: str = Form(...), user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     if confirm != "DELETE":
@@ -868,7 +804,7 @@ async def delete_account_submit(request: Request, password: str = Form(...), con
 async def update_read_receipts(
     request: Request,
     enabled: bool = Form(...),
-    user = Depends(get_user_from_session),
+    user = Depends(get_user_from_session_direct),
     db: Session = Depends(get_db)
 ):
     if not user:
@@ -881,14 +817,14 @@ async def update_read_receipts(
     return {"success": True, "message": f"Read receipts {'enabled' if enabled else 'disabled'}"}
 
 @app.get("/send", response_class=HTMLResponse)
-async def send_page(request: Request, user = Depends(get_user_from_session)):
+async def send_page(request: Request, user = Depends(get_user_from_session_direct)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("send.html", {"request": request, "user": user})
 
 @app.post("/send/submit")
 @limiter.limit("20/hour")
-async def submit_file(request: Request, recipient: str = Form(...), filename: str = Form(...), file_size: str = Form(...), options: str = Form(...), encrypted_file: UploadFile = FastAPIFile(...), encryption_key: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def submit_file(request: Request, recipient: str = Form(...), filename: str = Form(...), file_size: str = Form(...), options: str = Form(...), encrypted_file: UploadFile = FastAPIFile(...), encryption_key: str = Form(...), user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return {"success": False, "error": "Not authenticated"}
     
@@ -908,9 +844,10 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
     if actual_size > limits["max_file_size"]:
         return {"success": False, "error": f"File too large. Max {limits['max_file_size']/1073741824}GB"}
     
-    valid, error = validate_file_type(filename, encrypted_file.content_type)
-    if not valid:
-        return {"success": False, "error": error}
+    # Skip MIME validation for uploads
+    ext = filename.split('.')[-1].lower() if '.' in filename else ''
+    if ext not in ALLOWED_EXTENSIONS:
+        return {"success": False, "error": f"File extension .{ext} is not allowed"}
     
     recipient_user = db.query(User).filter(func.lower(User.username) == recipient.lower()).first()
     if not recipient_user:
@@ -930,9 +867,13 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
         opts = json.loads(options)
     except:
         opts = {}
+    
+    # Ensure password_protected is false if no password
     if opts.get("password_protected") and opts.get("file_password"):
         opts["file_password_hash"] = hash_password(escape_html(opts["file_password"]))
         del opts["file_password"]
+    else:
+        opts["password_protected"] = False
     
     pending_expiry = datetime.utcnow() + timedelta(hours=72)
     encrypted_filename = f"{secrets.token_hex(32)}.enc"
@@ -940,12 +881,21 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
     with open(file_path, "wb") as f:
         f.write(encrypted_data)
     
+    is_clean, scan_error = scan_file_for_viruses(file_path)
+    if not is_clean:
+        os.remove(file_path)
+        return {"success": False, "error": scan_error or "File rejected: security check failed"}
+    
     try:
-        aes_key = base64.b64decode(encryption_key)
-        salt, iv, encrypted_key, tag = encrypt_aes_key(aes_key, recipient_user.password_hash)
-        encrypted_key_data = base64.b64encode(salt + iv + encrypted_key + tag).decode('utf-8')
+        aes_key_bytes = base64.b64decode(encryption_key)
+        recipient_pubkey_bytes = base64.b64decode(recipient_user.public_key)
+        recipient_public = PublicKey(recipient_pubkey_bytes)
+        sealed_box = SealedBox(recipient_public)
+        encrypted_key = sealed_box.encrypt(aes_key_bytes)
+        encrypted_key_b64 = base64.b64encode(encrypted_key).decode('utf-8')
     except Exception as e:
         logger.error(f"Failed to encrypt key for file {filename}: {str(e)}")
+        os.remove(file_path)
         return {"success": False, "error": "Failed to encrypt file"}
     
     new_file = File(
@@ -953,7 +903,7 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
         recipient_id=recipient_user.id,
         filename=filename,
         encrypted_filename=encrypted_filename,
-        encrypted_file_key=encrypted_key_data,
+        file_key_sealed=encrypted_key_b64,
         file_size=actual_size,
         status="pending",
         options=json.dumps(opts),
@@ -966,7 +916,7 @@ async def submit_file(request: Request, recipient: str = Form(...), filename: st
     return {"success": True, "file_id": new_file.id}
 
 @app.get("/files/accept/{file_id}")
-async def accept_file(request: Request, file_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def accept_file(request: Request, file_id: int, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return {"success": False, "error": "Not authenticated"}
     
@@ -997,7 +947,7 @@ async def accept_file(request: Request, file_id: int, user = Depends(get_user_fr
     return {"success": True, "file_id": file.id, "filename": file.filename}
 
 @app.get("/files/decline/{file_id}")
-async def decline_file(request: Request, file_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def decline_file(request: Request, file_id: int, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     file = db.query(File).filter(File.id == file_id, File.recipient_id == user.id, File.status == "pending").first()
@@ -1012,7 +962,7 @@ async def decline_file(request: Request, file_id: int, user = Depends(get_user_f
     return RedirectResponse(url="/foryou", status_code=303)
 
 @app.get("/files/cancel/{file_id}")
-async def cancel_file(request: Request, file_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def cancel_file(request: Request, file_id: int, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     file = db.query(File).filter(File.id == file_id, File.sender_id == user.id, File.status == "pending").first()
@@ -1030,7 +980,7 @@ async def cancel_file(request: Request, file_id: int, user = Depends(get_user_fr
 async def download_file(
     request: Request,
     file_id: int,
-    user = Depends(get_user_from_session),
+    user = Depends(get_user_from_session_direct),
     db: Session = Depends(get_db),
     password: str = None
 ):
@@ -1063,52 +1013,52 @@ async def download_file(
         return RedirectResponse(url="/history", status_code=303)
     
     opts = json.loads(file.options) if file.options else {}
-    if opts.get("password_protected"):
+    
+    # Only check password if password_protected is True AND file_password_hash exists
+    if opts.get("password_protected") and opts.get("file_password_hash"):
         if not password:
             return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user})
         elif not verify_password(password, opts.get("file_password_hash")):
             return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user, "error": "Incorrect password"})
     
-    if file.encrypted_file_key:
-        try:
-            encrypted_key_data = base64.b64decode(file.encrypted_file_key)
-            salt = encrypted_key_data[:16]
-            iv = encrypted_key_data[16:28]
-            tag = encrypted_key_data[-16:]
-            encrypted_key = encrypted_key_data[28:-16]
-            
-            aes_key = decrypt_aes_key(encrypted_key, user.password_hash, salt, iv, tag)
-            
-            with open(file_path, 'rb') as f:
-                encrypted_data = f.read()
-            
-            file_iv = encrypted_data[:12]
-            file_tag = encrypted_data[-16:]
-            encrypted_content = encrypted_data[12:-16]
-            
-            cipher = Cipher(algorithms.AES(aes_key), modes.GCM(file_iv, file_tag), backend=default_backend())
-            decryptor = cipher.decryptor()
-            decrypted_data = decryptor.update(encrypted_content) + decryptor.finalize()
-            
-            safe_filename = sanitize_filename(file.filename)
-            
-            log_security_event(db, user.id, f"File downloaded: {file.filename}", "file_download", f"From user {file.sender.username}", request)
-            
-            return Response(
-                content=decrypted_data,
-                media_type="application/octet-stream",
-                headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'}
-            )
-        except Exception as e:
-            logger.error(f"Decryption failed for file {file_id}: {str(e)}")
-            return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user, "error": "Decryption failed"})
-    
-    safe_filename = sanitize_filename(file.filename)
-    return FileResponse(file_path, media_type="application/octet-stream", filename=file.filename, headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'})
+    try:
+        user_private_bytes = base64.b64decode(user.private_key)
+        user_private = PrivateKey(user_private_bytes)
+        
+        sealed_box = SealedBox(user_private)
+        encrypted_key_bytes = base64.b64decode(file.file_key_sealed)
+        aes_key_bytes = sealed_box.decrypt(encrypted_key_bytes)
+        
+        with open(file_path, 'rb') as f:
+            encrypted_data = f.read()
+        
+        file_iv = encrypted_data[:12]
+        file_tag = encrypted_data[-16:]
+        encrypted_content = encrypted_data[12:-16]
+        
+        cipher = Cipher(algorithms.AES(aes_key_bytes), modes.GCM(file_iv, file_tag), backend=default_backend())
+        decryptor = cipher.decryptor()
+        decrypted_data = decryptor.update(encrypted_content) + decryptor.finalize()
+        
+        safe_filename = sanitize_filename(file.filename)
+        
+        log_security_event(db, user.id, f"File downloaded: {file.filename}", "file_download", f"From user {file.sender.username}", request)
+        
+        return Response(
+            content=decrypted_data,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'}
+        )
+    except CryptoError:
+        logger.error(f"Decryption failed for file {file_id}: Invalid sealed box")
+        return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user, "error": "Decryption failed: Invalid key"})
+    except Exception as e:
+        logger.error(f"Decryption failed for file {file_id}: {str(e)}")
+        return templates.TemplateResponse("password_form.html", {"request": request, "file_id": file_id, "filename": file.filename, "user": user, "error": "Decryption failed"})
 
 @app.get("/search")
 @limiter.limit("10/minute")
-async def search_users(request: Request, q: str, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def search_users(request: Request, q: str, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user:
         return {"users": []}
     q = escape_html(q)
@@ -1126,7 +1076,8 @@ async def logout(request: Request, session_token: str = Cookie(None), db: Sessio
         db_session = db.query(DBSession).filter(DBSession.session_token == session_token).first()
         if db_session and db_session.user:
             log_security_event(db, db_session.user.id, "Logout", "logout", None, request)
-        db.delete(db_session) if db_session else None
+        if db_session:
+            db.delete(db_session)
         db.commit()
     response = RedirectResponse(url="/home", status_code=303)
     response.delete_cookie("session_token")
@@ -1230,7 +1181,7 @@ async def get_security_logs(session_token: str = Cookie(None), db: Session = Dep
     }
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_panel(request: Request, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+async def admin_panel(request: Request, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
         return RedirectResponse(url="/home", status_code=303)
     csrf_token = generate_csrf_token(user.id, db)
@@ -1242,7 +1193,8 @@ async def admin_panel(request: Request, user = Depends(get_user_from_session), d
     })
 
 @app.get("/admin/stats")
-async def admin_stats(user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def admin_stats(request: Request, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     total_users = db.query(User).count()
@@ -1263,14 +1215,15 @@ async def admin_stats(user = Depends(get_user_from_session), db: Session = Depen
     }
 
 @app.get("/admin/search-users")
-async def admin_search_users(q: str = "", role: str = "all", status: str = "all", user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def admin_search_users(request: Request, q: str = "", role: str = "all", status: str = "all", user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     query = db.query(User)
     if q:
         query = query.filter(func.lower(User.username).contains(q.lower()))
     if role != "all":
-        query = query.filter(User.role == role, User.is_banned == False)
+        query = query.filter(User.role == role)
     if status == "banned":
         query = query.filter(User.is_banned == True)
     elif status == "active":
@@ -1298,21 +1251,31 @@ async def admin_search_users(q: str = "", role: str = "all", status: str = "all"
     return {"success": True, "users": result}
 
 @app.post("/admin/user/ban/{user_id}")
+@limiter.limit("10/minute")
 async def admin_ban_user(
     request: Request,
     user_id: int,
     reason: str = Form(...),
     csrf_token: str = Form(...),
-    user = Depends(get_user_from_session),
+    admin_password: str = Form(None),
+    user = Depends(get_user_from_session_direct),
     db: Session = Depends(get_db)
 ):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     if not validate_csrf_token(csrf_token, user.id, db):
         return {"success": False, "error": "Invalid CSRF token"}
+    
+    if not admin_password or not verify_password(admin_password, user.password_hash):
+        return {"success": False, "error": "Admin password required for this action"}
+    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
+    
+    if target.id == user.id:
+        return {"success": False, "error": "You cannot ban yourself"}
+    
     sessions = db.query(DBSession).filter(DBSession.user_id == target.id).all()
     session_count = len(sessions)
     for s in sessions:
@@ -1325,20 +1288,30 @@ async def admin_ban_user(
     return {"success": True, "message": f"User {target.username} banned, {session_count} sessions terminated"}
 
 @app.post("/admin/user/unban/{user_id}")
+@limiter.limit("10/minute")
 async def admin_unban_user(
     request: Request,
     user_id: int,
     csrf_token: str = Form(...),
-    user = Depends(get_user_from_session),
+    admin_password: str = Form(None),
+    user = Depends(get_user_from_session_direct),
     db: Session = Depends(get_db)
 ):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     if not validate_csrf_token(csrf_token, user.id, db):
         return {"success": False, "error": "Invalid CSRF token"}
+    
+    if not admin_password or not verify_password(admin_password, user.password_hash):
+        return {"success": False, "error": "Admin password required for this action"}
+    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
+    
+    if target.id == user.id:
+        return {"success": False, "error": "You cannot unban yourself"}
+    
     target.is_banned = False
     target.ban_reason = None
     db.commit()
@@ -1347,23 +1320,33 @@ async def admin_unban_user(
     return {"success": True, "message": f"User {target.username} unbanned"}
 
 @app.post("/admin/user/role/{user_id}")
+@limiter.limit("10/minute")
 async def admin_change_role(
     request: Request,
     user_id: int,
     role: str = Form(...),
     csrf_token: str = Form(...),
-    user = Depends(get_user_from_session),
+    admin_password: str = Form(None),
+    user = Depends(get_user_from_session_direct),
     db: Session = Depends(get_db)
 ):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     if not validate_csrf_token(csrf_token, user.id, db):
         return {"success": False, "error": "Invalid CSRF token"}
+    
+    if not admin_password or not verify_password(admin_password, user.password_hash):
+        return {"success": False, "error": "Admin password required for this action"}
+    
     if role not in ["user", "pro", "premium"]:
         return {"success": False, "error": "Invalid role"}
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
+    
+    if target.id == user.id and role != "owner":
+        return {"success": False, "error": "You cannot change your own role"}
+    
     old_role = target.role
     target.role = role
     if role in ["pro", "premium"]:
@@ -1376,20 +1359,30 @@ async def admin_change_role(
     return {"success": True, "message": f"User {target.username} role changed to {role} (expires in 30 days)"}
 
 @app.post("/admin/user/delete/{user_id}")
+@limiter.limit("5/minute")
 async def admin_delete_user(
     request: Request,
     user_id: int,
     csrf_token: str = Form(...),
-    user = Depends(get_user_from_session),
+    admin_password: str = Form(None),
+    user = Depends(get_user_from_session_direct),
     db: Session = Depends(get_db)
 ):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     if not validate_csrf_token(csrf_token, user.id, db):
         return {"success": False, "error": "Invalid CSRF token"}
+    
+    if not admin_password or not verify_password(admin_password, user.password_hash):
+        return {"success": False, "error": "Admin password required for this action"}
+    
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         return {"success": False, "error": "User not found"}
+    
+    if target.id == user.id:
+        return {"success": False, "error": "You cannot delete yourself from admin panel. Use account deletion page."}
+    
     files = db.query(File).filter((File.sender_id == target.id) | (File.recipient_id == target.id)).all()
     for f in files:
         file_path = os.path.join(UPLOAD_DIR, f.encrypted_filename)
@@ -1398,10 +1391,11 @@ async def admin_delete_user(
     log_security_event(db, user.id, f"User deleted: {target.username}", "admin_delete", f"All associated data removed", request)
     db.delete(target)
     db.commit()
-    return {"success": True, "message": f"User {target.username} and all associated data deleted", "redirect": "/home"}
+    return {"success": True, "message": f"User {target.username} and all associated data deleted", "redirect": "/admin"}
 
 @app.get("/admin/user/{user_id}")
-async def admin_user_details(user_id: int, user = Depends(get_user_from_session), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def admin_user_details(request: Request, user_id: int, user = Depends(get_user_from_session_direct), db: Session = Depends(get_db)):
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
     target = db.query(User).filter(User.id == user_id).first()
@@ -1451,7 +1445,8 @@ async def admin_user_details(user_id: int, user = Depends(get_user_from_session)
     }
 
 @app.get("/admin/chart/user-growth")
-async def chart_user_growth(days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def chart_user_growth(request: Request, days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
@@ -1467,7 +1462,8 @@ async def chart_user_growth(days: int = 30, session_token: str = Cookie(None), d
     return {"success": True, "labels": labels, "values": values}
 
 @app.get("/admin/chart/file-activity")
-async def chart_file_activity(days: int = 30, type: str = "uploads", session_token: str = Cookie(None), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def chart_file_activity(request: Request, days: int = 30, type: str = "uploads", session_token: str = Cookie(None), db: Session = Depends(get_db)):
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
@@ -1486,7 +1482,8 @@ async def chart_file_activity(days: int = 30, type: str = "uploads", session_tok
     return {"success": True, "labels": labels, "values": values}
 
 @app.get("/admin/chart/storage-by-role")
-async def chart_storage_by_role(session_token: str = Cookie(None), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def chart_storage_by_role(request: Request, session_token: str = Cookie(None), db: Session = Depends(get_db)):
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
@@ -1504,7 +1501,8 @@ async def chart_storage_by_role(session_token: str = Cookie(None), db: Session =
     }
 
 @app.get("/admin/chart/storage-trend")
-async def chart_storage_trend(days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def chart_storage_trend(request: Request, days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
@@ -1532,7 +1530,8 @@ async def chart_storage_trend(days: int = 30, session_token: str = Cookie(None),
     }
 
 @app.get("/admin/chart/activity-heatmap")
-async def chart_activity_heatmap(days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+async def chart_activity_heatmap(request: Request, days: int = 30, session_token: str = Cookie(None), db: Session = Depends(get_db)):
     user = get_current_user(db, session_token)
     if not user or user.role != "owner":
         return {"success": False, "error": "Unauthorized"}
@@ -1554,7 +1553,7 @@ async def chart_activity_heatmap(days: int = 30, session_token: str = Cookie(Non
 @app.get("/files/raw/{file_id}")
 async def download_raw_file(
     file_id: int,
-    user = Depends(get_user_from_session),
+    user = Depends(get_user_from_session_direct),
     db: Session = Depends(get_db)
 ):
     if not user:
@@ -1569,7 +1568,7 @@ async def download_raw_file(
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc):
-    user = await get_user_from_session(request)
+    user = await get_user_from_session_direct(request)
     return templates.TemplateResponse("404.html", {"request": request, "user": user}, status_code=404)
 
 if __name__ == "__main__":

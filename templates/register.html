@@ -23,7 +23,7 @@
         
         <div class="form-group">
             <label for="confirm_password">Confirm Password</label>
-            <input type="password" id="confirm_password" name="confirm_password" required minlength="8" maxlength="16">
+            <input type="password" id="confirm_password" name="confirm_password" required>
             <small>Re-enter your password</small>
         </div>
         
@@ -52,165 +52,223 @@
     <p>Already have an account? <a href="/login">Login</a></p>
 </div>
 
+<!-- Recovery Phrase Modal (shown only after successful registration) -->
+<div id="recoveryModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>⚠️ Save Your Recovery Phrase</h3>
+        </div>
+        <div class="modal-body">
+            <p class="warning-text">This is the ONLY way to recover your account if you forget your password or lose 2FA.</p>
+            <div class="recovery-phrase-box" id="recoveryPhraseText"></div>
+            <p class="warning-text">Save this phrase now! It will NOT be shown again.</p>
+            <div class="recovery-actions">
+                <button id="downloadRecoveryBtn" class="btn btn-primary">Download as File</button>
+                <button id="copyRecoveryBtn" class="btn btn-secondary">Copy to Clipboard</button>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button id="confirmRecoverySavedBtn" class="btn-success">I Have Saved My Recovery Phrase</button>
+        </div>
+    </div>
+</div>
+
 <script>
-    function escapeHtml(text) {
-        if (!text) return '';
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showValidationMessage(input, message, isError) {
+    let existingMsg = input.parentElement.querySelector('.validation-message');
+    if (existingMsg) existingMsg.remove();
+    
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'validation-message ' + (isError ? 'validation-error' : 'validation-success');
+    msgDiv.textContent = escapeHtml(message);
+    input.parentElement.appendChild(msgDiv);
+    
+    if (isError) {
+        input.classList.add('error');
+        input.classList.remove('success');
+    } else {
+        input.classList.add('success');
+        input.classList.remove('error');
     }
     
-    function showValidationMessage(input, message, isError) {
-        let existingMsg = input.parentElement.querySelector('.validation-message');
-        if (existingMsg) existingMsg.remove();
-        
-        const msgDiv = document.createElement('div');
-        msgDiv.className = 'validation-message ' + (isError ? 'validation-error' : 'validation-success');
-        msgDiv.textContent = escapeHtml(message);
-        input.parentElement.appendChild(msgDiv);
-        
-        if (isError) {
-            input.classList.add('error');
-            input.classList.remove('success');
+    setTimeout(() => {
+        if (msgDiv.parentNode) msgDiv.remove();
+        input.classList.remove('error', 'success');
+    }, 3000);
+}
+
+const form = document.getElementById('registerForm');
+const passwordField = document.getElementById('password');
+const confirmPasswordField = document.getElementById('confirm_password');
+const pinField = document.getElementById('pin');
+const confirmPinField = document.getElementById('confirm_pin');
+
+function validatePasswords() {
+    const password = passwordField.value;
+    const confirm = confirmPasswordField.value;
+    
+    if (confirm.length === 0) return true;
+    
+    if (password !== confirm) {
+        showValidationMessage(confirmPasswordField, 'Passwords do not match', true);
+        return false;
+    } else {
+        showValidationMessage(confirmPasswordField, 'Passwords match', false);
+        return true;
+    }
+}
+
+function validatePins() {
+    const pin = pinField.value;
+    const confirm = confirmPinField.value;
+    
+    if (confirm.length === 0) return true;
+    
+    if (pin !== confirm) {
+        showValidationMessage(confirmPinField, 'PINs do not match', true);
+        return false;
+    } else {
+        showValidationMessage(confirmPinField, 'PINs match', false);
+        return true;
+    }
+}
+
+passwordField.addEventListener('input', validatePasswords);
+confirmPasswordField.addEventListener('input', validatePasswords);
+pinField.addEventListener('input', validatePins);
+confirmPinField.addEventListener('input', validatePins);
+
+let savedRecoveryPhrase = null;
+
+form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    let hasError = false;
+    
+    const password = passwordField.value;
+    const confirmPassword = confirmPasswordField.value;
+    const pin = pinField.value;
+    const confirmPin = confirmPinField.value;
+    
+    if (password !== confirmPassword) {
+        showValidationMessage(confirmPasswordField, 'Passwords do not match', true);
+        hasError = true;
+    }
+    
+    if (pin !== confirmPin) {
+        showValidationMessage(confirmPinField, 'PINs do not match', true);
+        hasError = true;
+    }
+    
+    const termsCheckbox = form.querySelector('input[name="terms"]');
+    if (!termsCheckbox.checked) {
+        if (window.toast) {
+            window.toast.warning('You must accept the Terms of Service');
         } else {
-            input.classList.add('success');
-            input.classList.remove('error');
+            alert('You must accept the Terms of Service');
         }
-        
-        setTimeout(() => {
-            if (msgDiv.parentNode) msgDiv.remove();
-            input.classList.remove('error', 'success');
-        }, 3000);
+        hasError = true;
     }
     
-    const form = document.getElementById('registerForm');
-    const passwordField = document.getElementById('password');
-    const confirmPasswordField = document.getElementById('confirm_password');
-    const pinField = document.getElementById('pin');
-    const confirmPinField = document.getElementById('confirm_pin');
+    if (hasError) return;
     
-    function validatePasswords() {
-        const password = passwordField.value;
-        const confirm = confirmPasswordField.value;
-        
-        if (confirm.length === 0) return true;
-        
-        if (password !== confirm) {
-            showValidationMessage(confirmPasswordField, 'Passwords do not match', true);
-            return false;
-        } else {
-            showValidationMessage(confirmPasswordField, 'Passwords match', false);
-            return true;
-        }
-    }
+    const username = document.getElementById('username').value;
     
-    function validatePins() {
-        const pin = pinField.value;
-        const confirm = confirmPinField.value;
-        
-        if (confirm.length === 0) return true;
-        
-        if (pin !== confirm) {
-            showValidationMessage(confirmPinField, 'PINs do not match', true);
-            return false;
-        } else {
-            showValidationMessage(confirmPinField, 'PINs match', false);
-            return true;
-        }
-    }
+    const formData = new FormData();
+    formData.append('username', username);
+    formData.append('password', password);
+    formData.append('pin', pin);
+    formData.append('terms', true);
+    formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
     
-    passwordField.addEventListener('input', validatePasswords);
-    confirmPasswordField.addEventListener('input', validatePasswords);
-    pinField.addEventListener('input', validatePins);
-    confirmPinField.addEventListener('input', validatePins);
+    const submitBtn = this.querySelector('button[type="submit"]');
+    const originalText = submitBtn.textContent;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating account...';
     
-    form.addEventListener('submit', async function(e) {
-        e.preventDefault();
-        
-        let hasError = false;
-        
-        const password = passwordField.value;
-        const confirmPassword = confirmPasswordField.value;
-        const pin = pinField.value;
-        const confirmPin = confirmPinField.value;
-        
-        if (password !== confirmPassword) {
-            showValidationMessage(confirmPasswordField, 'Passwords do not match', true);
-            hasError = true;
-        }
-        
-        if (pin !== confirmPin) {
-            showValidationMessage(confirmPinField, 'PINs do not match', true);
-            hasError = true;
-        }
-        
-        const termsCheckbox = form.querySelector('input[name="terms"]');
-        if (!termsCheckbox.checked) {
-            if (window.toast) {
-                window.toast.warning('You must accept the Terms of Service');
-            } else {
-                alert('You must accept the Terms of Service');
+    try {
+        const response = await fetch('/register', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
             }
-            hasError = true;
-        }
+        });
         
-        if (hasError) return;
+        const data = await response.json();
         
-        const username = document.getElementById('username').value;
-        
-        const formData = new FormData();
-        formData.append('username', username);
-        formData.append('password', password);
-        formData.append('pin', pin);
-        formData.append('terms', true);
-        formData.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
-        
-        const submitBtn = this.querySelector('button[type="submit"]');
-        const originalText = submitBtn.textContent;
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Creating account...';
-        
-        try {
-            const response = await fetch('/register', {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
-            });
+        if (data.success) {
+            savedRecoveryPhrase = data.recovery_phrase;
             
-            const data = await response.json();
+            // Show modal with recovery phrase (not displayed on screen directly)
+            const modal = document.getElementById('recoveryModal');
+            const phraseBox = document.getElementById('recoveryPhraseText');
+            phraseBox.textContent = savedRecoveryPhrase;
+            modal.style.display = 'block';
             
-            if (data.success) {
-                if (window.toast) {
-                    window.toast.success('Account created successfully!');
-                }
-                alert('Account created!\n\nYour Recovery Phrase:\n' + data.recovery_phrase + '\n\nSAVE THIS PHRASE! You will need it to recover your account.');
-                window.location.href = '/login';
-            } else {
-                if (window.toast) {
-                    window.toast.error(escapeHtml(data.error));
-                } else {
-                    alert(data.error);
-                }
-                submitBtn.disabled = false;
-                submitBtn.textContent = originalText;
-            }
-        } catch (error) {
             if (window.toast) {
-                window.toast.error('Network error: ' + escapeHtml(error.message));
+                window.toast.success('Account created successfully!');
+            }
+        } else {
+            if (window.toast) {
+                window.toast.error(escapeHtml(data.error));
             } else {
-                alert('Network error: ' + error.message);
+                alert(data.error);
             }
             submitBtn.disabled = false;
             submitBtn.textContent = originalText;
         }
-    });
+    } catch (error) {
+        if (window.toast) {
+            window.toast.error('Network error: ' + escapeHtml(error.message));
+        } else {
+            alert('Network error: ' + error.message);
+        }
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+    }
+});
+
+// Recovery phrase handlers
+document.getElementById('downloadRecoveryBtn')?.addEventListener('click', () => {
+    if (savedRecoveryPhrase) {
+        const blob = new Blob([savedRecoveryPhrase], {type: 'text/plain'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'dispatch_recovery_phrase.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        if (window.toast) window.toast.success('Recovery phrase downloaded');
+    }
+});
+
+document.getElementById('copyRecoveryBtn')?.addEventListener('click', async () => {
+    if (savedRecoveryPhrase) {
+        await navigator.clipboard.writeText(savedRecoveryPhrase);
+        if (window.toast) window.toast.success('Recovery phrase copied to clipboard');
+    }
+});
+
+document.getElementById('confirmRecoverySavedBtn')?.addEventListener('click', () => {
+    document.getElementById('recoveryModal').style.display = 'none';
+    savedRecoveryPhrase = null;
+    window.location.href = '/login?success=Account created successfully!';
+});
 </script>
 
 <style>
-.recovery-phrase {
-    background: #f0f0f0;
+.recovery-phrase-box {
+    background: var(--bg-tertiary);
     padding: 1rem;
     font-family: monospace;
     word-break: break-all;
@@ -218,13 +276,11 @@
     border-radius: 4px;
     text-align: center;
     font-size: 0.85rem;
+    font-weight: bold;
+    border: 1px solid var(--border-light);
 }
-body.dark .recovery-phrase {
-    background: #1a1a1a;
-    color: #0f0;
-}
-.warning {
-    color: #ff4444;
+.warning-text {
+    color: var(--danger);
     font-weight: bold;
 }
 .validation-message {
@@ -235,24 +291,22 @@ body.dark .recovery-phrase {
     animation: fadeIn 0.2s ease;
 }
 .validation-success {
-    color: #2ecc71;
-    background: rgba(46, 204, 113, 0.1);
+    color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
 }
 .validation-error {
-    color: #e74c3c;
-    background: rgba(231, 76, 60, 0.1);
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
 }
 #password.error, #confirm_password.error, #pin.error, #confirm_pin.error {
-    border-color: #e74c3c;
+    border-color: var(--danger);
 }
 #password.success, #confirm_password.success, #pin.success, #confirm_pin.success {
-    border-color: #2ecc71;
+    border-color: var(--success);
 }
-
 .terms-group {
     margin: 1.5rem 0;
 }
-
 .checkbox-label {
     display: flex;
     align-items: center;
@@ -261,14 +315,12 @@ body.dark .recovery-phrase {
     user-select: none;
     position: relative;
 }
-
 .checkbox-input {
     position: absolute;
     opacity: 0;
     width: 0;
     height: 0;
 }
-
 .checkbox-custom {
     width: 20px;
     height: 20px;
@@ -280,12 +332,10 @@ body.dark .recovery-phrase {
     transition: all var(--transition-fast);
     flex-shrink: 0;
 }
-
 .checkbox-input:checked + .checkbox-custom {
     background: var(--gradient-primary);
     border-color: var(--primary);
 }
-
 .checkbox-input:checked + .checkbox-custom::after {
     content: '';
     position: absolute;
@@ -297,46 +347,79 @@ body.dark .recovery-phrase {
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
 }
-
 .checkbox-input:focus + .checkbox-custom {
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
     border-color: var(--primary);
 }
-
 .checkbox-label:hover .checkbox-custom {
     border-color: var(--primary);
 }
-
 .checkbox-text {
     font-size: 0.9rem;
     color: var(--text-secondary);
     line-height: 1.4;
 }
-
 .checkbox-text a {
     color: var(--primary);
     text-decoration: none;
     font-weight: 500;
-    transition: all var(--transition-fast);
 }
-
 .checkbox-text a:hover {
     text-decoration: underline;
-    opacity: 0.8;
 }
-
-body.dark .checkbox-custom {
-    background: var(--bg-tertiary);
-    border-color: var(--border-medium);
+.recovery-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin: 1rem 0;
 }
-
-body.dark .checkbox-input:checked + .checkbox-custom {
-    background: var(--gradient-primary);
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
 }
-
+.modal-content {
+    background: var(--bg-secondary);
+    margin: 10% auto;
+    border-radius: var(--radius-lg);
+    width: 90%;
+    max-width: 500px;
+    border: 1px solid var(--border-light);
+}
+.modal-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-light);
+}
+.modal-header h3 {
+    margin: 0;
+    color: var(--warning);
+}
+.modal-body {
+    padding: 1.25rem;
+}
+.modal-footer {
+    padding: 0.75rem 1.25rem;
+    border-top: 1px solid var(--border-light);
+    display: flex;
+    justify-content: center;
+}
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(-5px); }
     to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 768px) {
+    .recovery-actions {
+        flex-direction: column;
+    }
+    .recovery-actions button {
+        width: 100%;
+    }
 }
 </style>
 {% endblock %}

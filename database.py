@@ -13,18 +13,17 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL must be set in .env file")
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# IP hashing function for privacy
+# IP hashing salt - stored in env, not in code
 IP_SALT = os.getenv("IP_SALT", secrets.token_hex(32))
 
 def hash_ip_address(ip_address: str) -> str:
     """Hash IP address for privacy while preserving rate limiting capability"""
-    if not ip_address:
+    if not ip_address or ip_address == "unknown":
         return None
-    # Use SHA-256 with salt - cannot be reversed
     return hashlib.sha256(f"{IP_SALT}{ip_address}".encode()).hexdigest()
 
 class User(Base):
@@ -46,6 +45,10 @@ class User(Base):
     subscription_expires_at = Column(DateTime, nullable=True)
     bio = Column(Text, nullable=True)
     read_receipts_enabled = Column(Boolean, default=True)
+    
+    # NEW: libsodium key pairs for file encryption
+    public_key = Column(String(255), nullable=True)   # Base64 encoded
+    private_key = Column(String(255), nullable=True)  # Base64 encoded - NEVER exposed to client
     
     # Relationships
     files_sent = relationship("File", foreign_keys="File.sender_id", back_populates="sender")
@@ -73,6 +76,7 @@ class Session(Base):
     expires_at = Column(DateTime, nullable=False)
     twofa_verified = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_activity = Column(DateTime, default=datetime.utcnow)  # NEW: track activity
     
     user = relationship("User", back_populates="sessions")
 
@@ -84,7 +88,8 @@ class File(Base):
     recipient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     filename = Column(String(255), nullable=False)
     encrypted_filename = Column(String(255), nullable=False)
-    encrypted_file_key = Column(Text, nullable=False)
+    # REPLACED: encrypted_file_key removed, using sealed box
+    file_key_sealed = Column(Text, nullable=False)  # Sealed box encrypted with recipient's public key
     file_size = Column(BigInteger, nullable=False)
     status = Column(String(20), default="pending")  # pending, accepted, declined, downloaded, expired, cancelled
     options = Column(Text, nullable=True)
@@ -156,7 +161,7 @@ class LoginHistory(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     login_time = Column(DateTime, default=datetime.utcnow)
-    ip_hash = Column(String(64), nullable=True)  # HASHED IP - not plaintext!
+    ip_hash = Column(String(64), nullable=True)
     
     user = relationship("User", back_populates="login_history")
 
@@ -168,7 +173,7 @@ class SecurityLog(Base):
     action = Column(String(255), nullable=False)
     action_type = Column(String(50), nullable=False)
     details = Column(Text, nullable=True)
-    ip_hash = Column(String(64), nullable=True)  # HASHED IP - not plaintext!
+    ip_hash = Column(String(64), nullable=True)
     user_agent = Column(String(500), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -183,9 +188,8 @@ class FailedLoginAttempt(Base):
     twofa_failures = Column(Integer, default=0)
     last_attempt = Column(DateTime, default=datetime.utcnow)
     lock_until = Column(DateTime, nullable=True)
-    ip_hash = Column(String(64), nullable=True)  # HASHED IP - not plaintext!
+    ip_hash = Column(String(64), nullable=True)
     
-    # Composite index for faster lookups
     __table_args__ = (
         Index('ix_failed_attempts_username_ip', 'username', 'ip_hash'),
     )
@@ -285,6 +289,5 @@ def get_db():
     finally:
         db.close()
 
-# Create all tables
 def init_db():
     Base.metadata.create_all(bind=engine)
