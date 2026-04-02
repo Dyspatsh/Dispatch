@@ -32,7 +32,6 @@ class User(Base):
     totp_secret = Column(String(32), nullable=True)
     totp_enabled = Column(Boolean, default=False)
     recovery_codes_hash = Column(Text, nullable=True)
-    theme = Column(String(10), default="light")
     bio = Column(String(200), nullable=True)
     subscription_expires_at = Column(DateTime, nullable=True)
     read_receipts_enabled = Column(Boolean, default=True)

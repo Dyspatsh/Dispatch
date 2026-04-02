@@ -143,17 +143,6 @@
                 
                 <div class="action-item">
                     <div class="action-info">
-                        <h3>Theme</h3>
-                        <p>Switch between light and dark mode</p>
-                    </div>
-                    <label class="theme-switch">
-                        <input type="checkbox" id="themeToggle" {% if user.theme == 'dark' %}checked{% endif %}>
-                        <span class="theme-slider"></span>
-                    </label>
-                </div>
-                
-                <div class="action-item">
-                    <div class="action-info">
                         <h3>Read Receipts</h3>
                         <p>Show when messages are read (Premium only)</p>
                     </div>
@@ -904,25 +893,6 @@ function updateSubscriptionCountdown() {
     }
     
     countdownSpan.innerHTML = `<span class="${colorClass}">(${timeText})</span>`;
-}
-
-// Theme toggle
-const themeToggle = document.getElementById('themeToggle');
-if (themeToggle) {
-    themeToggle.addEventListener('change', function() {
-        const newTheme = this.checked ? 'dark' : 'light';
-        document.body.className = newTheme;
-        localStorage.setItem('theme', newTheme);
-        
-        const formData = new FormData();
-        formData.append('theme', newTheme);
-        formData.append('csrf_token', getCsrfToken());
-        
-        fetch('/profile/change-theme', {
-            method: 'POST',
-            body: formData
-        });
-    });
 }
 
 // Read receipts toggle

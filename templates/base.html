@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="{{ user.theme if user else 'light' }}">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
@@ -7,14 +7,14 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <meta name="description" content="Dispatch - Privacy-Focused Tor File Sharing Platform">
-    <meta name="theme-color" content="#667eea">
+    <meta name="theme-color" content="#3B82F6">
     <title>{% block title %}Dispatch{% endblock %} - Private Tor File Sharing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="{{ user.theme if user else 'light' }}">
+<body>
     <nav>
         <div class="nav-container">
             <a href="/home" class="logo">Dispatch</a>
@@ -32,13 +32,13 @@
                     <a href="/history">History</a>
                     <a href="/chat">Messages</a>
                     <a href="/profile">Settings</a>
-		    <a href="/thecreator">The Creator</a>
+                    <a href="/thecreator">The Creator</a>
                     <a href="/about">About</a>
                     <a href="/logout">Logout</a>
                 {% else %}
                     <a href="/login">Login</a>
                     <a href="/recovery">Recovery</a>
-		    <a href="/thecreator">The Creator</a>
+                    <a href="/thecreator">The Creator</a>
                     <a href="/about">About</a>
                 {% endif %}
             </div>
@@ -73,13 +73,13 @@
                 <a href="/history">History</a>
                 <a href="/chat">Messages</a>
                 <a href="/profile">Settings</a>
-		<a href="/thecreator">The Creator</a>
+                <a href="/thecreator">The Creator</a>
                 <a href="/about">About</a>
                 <a href="/logout">Logout</a>
             {% else %}
                 <a href="/login">Login</a>
                 <a href="/recovery">Recovery</a>
-		<a href="/thecreator">The Creator</a>
+                <a href="/thecreator">The Creator</a>
                 <a href="/about">About</a>
             {% endif %}
         </div>
@@ -92,11 +92,13 @@
     </main>
     
     <footer>
-        <div class="footer-content">
-            <div class="footer-title">Dispatch</div>
-            <div class="copyright">2026 Dispatch - All rights reserved</div>
-            <div class="version">Version 2.0 - Privacy First</div>
-            <div class="contact">Contact: dispatsh@proton.me</div>
+        <div class="footer-container">
+            <div class="footer-content">
+                <div class="footer-title">Dispatch</div>
+                <div class="copyright">2026 Dispatch - All rights reserved</div>
+                <div class="version">Version 2.0 - Privacy First</div>
+                <div class="contact">Contact: <a href="mailto:dispatsh@proton.me">dispatsh@proton.me</a></div>
+            </div>
         </div>
     </footer>
     

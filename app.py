@@ -741,13 +741,6 @@ async def delete_account_submit(request: Request, password: str = Form(...), con
     response.delete_cookie("session_token")
     return response
 
-@app.post("/profile/change-theme")
-async def change_theme(theme: str = Form(...), user = Depends(get_user_from_session), db: Session = Depends(get_db)):
-    if user and theme in ["light", "dark"]:
-        user.theme = theme
-        db.commit()
-    return {"success": True}
-
 @app.post("/profile/read-receipts")
 async def update_read_receipts(
     request: Request,

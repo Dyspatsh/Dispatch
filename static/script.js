@@ -1,5 +1,6 @@
 // ============================================
-// DISPATCH - Modern UI Enhancements
+// DISPATCH - Core JavaScript
+// Dark Theme Only
 // ============================================
 
 // Toast Notification System
@@ -79,53 +80,9 @@ class ToastManager {
 // Initialize toast
 const toast = new ToastManager();
 
-// Theme Manager
-class ThemeManager {
-    constructor() {
-        this.theme = localStorage.getItem('theme') || 'light';
-        this.init();
-    }
-
-    init() {
-        this.applyTheme(this.theme);
-        this.setupToggle();
-    }
-
-    applyTheme(theme) {
-        document.body.className = theme;
-        document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('theme', theme);
-        
-        const toggle = document.getElementById('themeToggle');
-        if (toggle) {
-            toggle.checked = theme === 'dark';
-        }
-        
-        window.dispatchEvent(new CustomEvent('themeChanged', { detail: { theme } }));
-    }
-
-    toggle() {
-        const newTheme = this.theme === 'light' ? 'dark' : 'light';
-        this.theme = newTheme;
-        this.applyTheme(newTheme);
-        
-        fetch('/profile/change-theme', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'theme=' + newTheme
-        }).catch(err => console.error('Theme sync failed:', err));
-    }
-
-    setupToggle() {
-        const toggle = document.getElementById('themeToggle');
-        if (toggle) {
-            toggle.addEventListener('change', () => this.toggle());
-        }
-    }
-}
-
-// Initialize theme manager
-const themeManager = new ThemeManager();
+// Set dark theme only
+document.body.classList.add('dark');
+document.documentElement.setAttribute('data-theme', 'dark');
 
 // Loading Spinner Manager
 class LoadingManager {
@@ -235,6 +192,13 @@ function debounce(func, wait) {
     };
 }
 
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 // Mobile Menu Handler
 document.addEventListener('DOMContentLoaded', function() {
     const burgerMenu = document.getElementById('burgerMenu');
@@ -301,10 +265,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Export for use in other scripts
 window.toast = toast;
-window.ThemeManager = ThemeManager;
 window.LoadingManager = LoadingManager;
 window.SkeletonLoader = SkeletonLoader;
 window.formatFileSize = formatFileSize;
 window.formatExpiryTime = formatExpiryTime;
 window.copyToClipboard = copyToClipboard;
 window.debounce = debounce;
+window.escapeHtml = escapeHtml;
